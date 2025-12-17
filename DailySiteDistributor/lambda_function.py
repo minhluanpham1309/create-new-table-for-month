@@ -4,6 +4,7 @@ import pymysql
 import ssl
 import urllib.request
 import os
+import boto3
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from dotenv import load_dotenv
@@ -20,14 +21,40 @@ logger = logging.getLogger(__name__)
 
 RDS_CA_BUNDLE_URL = 'https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem'
 
+def lambda_handler(event=None, context=None):
+    cnx = None
+    cursor = None
+    region = get_region()
+
+    try: 
+        logger.info("Lambda function started")
+        secret = run_step("get_secret", get_secret, region)
+        cnx = run_step("get_db_connection", get_db_connection, secret)
+        cursor = cnx.cursor()
+
+        sites = run_step("get_all_sites", get_all_sites, cnx)
+
+        sublists = run_step("split_sites_into_21_days", split_sites_into_21_days, sites)
+        
+        schedule = run_step("generate_schedule", generate_schedule, sublists)
+
+        run_step("insert_schedule_to_db", insert_schedule_to_db, cnx, schedule)
+        
+    except Exception as e:
+        if cnx:
+            cnx.rollback()
+        logger.error(f"❌ Error in lambda_handler: {str(e)}", exc_info=True)
+    else:
+        if cnx:
+            cnx.commit()
+    finally:
+        if cursor:
+            cursor.close()
+        if cnx:
+            cnx.close()
+
+
 def download_rds_ca_bundle():
-    """
-    Download AWS RDS CA bundle
-    Cache local để không phải download mỗi lần
-    
-    Returns:
-        str: Path to CA bundle file
-    """
     # Cache trong thư mục hiện tại
     ca_bundle_path = './rds-ca-bundle.pem'
     
@@ -59,13 +86,21 @@ def download_rds_ca_bundle():
         logger.error(f"   curl -O {RDS_CA_BUNDLE_URL}")
         raise
 
+def run_step(step_name: str, func, *args, **kwargs):
+    try:
+        logger.info("")
+        logger.info(f"====== ⏳ START STEP: {step_name} ======")
+        result = func(*args, **kwargs)
+        logger.info(f"====== ✅ DONE STEP: {step_name} ======")
+        logger.info("")
+        return result
+    except Exception as e:
+        logger.error(f"====== ❌ ERROR STEP: {step_name} ======")
+        logger.error(f"Exception: {str(e)}")
+        logger.error("")
+        raise
+
 def get_ssl_context():
-    """
-    Tạo SSL context với RDS CA bundle
-    
-    Returns:
-        SSL context for pymysql
-    """
     try:
         # Get SSL mode from environment
         ssl_mode = os.getenv('SSL_MODE', 'VERIFY_CA')
@@ -77,19 +112,7 @@ def get_ssl_context():
         ssl_context = ssl.create_default_context(cafile=ca_bundle_path)
         
         # Configure based on mode
-        if ssl_mode == 'VERIFY_CA':
-            # Verify CA certificate but not hostname (good cho RDS)
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_REQUIRED
-            logger.info("🔒 SSL Mode: VERIFY_CA (verify certificate, skip hostname)")
-            
-        elif ssl_mode == 'VERIFY_IDENTITY':
-            # Full verification
-            ssl_context.check_hostname = True
-            ssl_context.verify_mode = ssl.CERT_REQUIRED
-            logger.info("🔒 SSL Mode: VERIFY_IDENTITY (full verification)")
-            
-        elif ssl_mode == 'SKIP_VERIFY':
+        if ssl_mode == 'SKIP_VERIFY':
             # Skip verification (not recommended)
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
@@ -108,50 +131,28 @@ def get_ssl_context():
         logger.error(f"❌ Failed to create SSL context: {str(e)}")
         raise
 
-def get_db_connection():
-    """
-    Kết nối RDS với SSL sử dụng AWS CA bundle
-    KHÔNG CẦN JKS!
-    
-    Returns:
-        pymysql.Connection: Database connection
-    """
+def get_db_connection(secret):
     try:
-        logger.info("Connecting to database...")
-        logger.info(f"Host: {os.getenv('DB_HOST')}")
-        logger.info(f"Port: {os.getenv('DB_PORT', 3306)}")
-        logger.info(f"Database: {os.getenv('DB_NAME')}")
-        
         # Create SSL context with RDS CA
         ssl_context = get_ssl_context()
         
         # Database configuration
         db_config = {
-            'host': os.getenv('DB_HOST'),
-            'port': int(os.getenv('DB_PORT', 3306)),
-            'user': os.getenv('DB_USER'),
-            'password': os.getenv('DB_PASSWORD'),
-            'database': os.getenv('DB_NAME'),
+            'host': secret.get('host', os.getenv('DB_HOST')),
+            'port': int(secret.get('port', os.getenv('DB_PORT', 3306))),
+            'user': secret.get('username', os.getenv('DB_USER')),
+            'password': secret.get('password', os.getenv('DB_PASSWORD')),
+            'database': secret.get('dbname', os.getenv('DB_NAME')),
             'charset': 'utf8mb4',
-            'cursorclass': pymysql.cursors.DictCursor,
             'connect_timeout': 10,
+            'cursorclass': pymysql.cursors.DictCursor,
             'ssl': ssl_context
         }
         
         # Connect
+        logger.info("🔌 Connecting to database...")
         connection = pymysql.connect(**db_config)
-        
-        # Verify SSL connection
-        with connection.cursor() as cursor:
-            cursor.execute("SHOW STATUS LIKE 'Ssl_cipher'")
-            result = cursor.fetchone()
-            
-            if result and result.get('Value'):
-                logger.info(f"✅ Database connection established with SSL")
-                logger.info(f"   SSL Cipher: {result['Value']}")
-            else:
-                logger.warning("⚠️  Connected but SSL cipher not detected")
-        
+        logger.info("✅ Database connection established")      
         return connection
         
     except pymysql.err.OperationalError as e:
@@ -178,15 +179,6 @@ def get_db_connection():
         logger.error("   3. Verify SSL_MODE setting")
 
 def get_all_sites(connection) -> List[Dict[str, Any]]:
-    """
-    Lấy toàn bộ sitelist từ database
-    
-    Args:
-        connection: Database connection
-        
-    Returns:
-        List[Dict]: List of sites với thông tin chi tiết
-    """
     try:
         with connection.cursor() as cursor:
             query = """
@@ -225,8 +217,6 @@ def split_sites_into_21_days(sites: List[Dict[str, Any]]) -> Dict[int, List[Dict
     for day in range(1, 22):
         end_idx = start_idx + sites_per_day + (1 if day <= remainder else 0)
         sublists[day] = sites[start_idx:end_idx]
-        
-        logger.info(f"   Day {day:2d}: {len(sublists[day]):3d} sites (index {start_idx:4d} to {end_idx-1:4d})")
         start_idx = end_idx
     
     return sublists
@@ -249,109 +239,54 @@ def generate_schedule(sublists: Dict[int, List[Dict[str, Any]]]) -> Dict[str, An
     
     return schedule
 
-def save_schedule_to_file(schedule_data: Dict[str, Any], filename: str = "schedule_output.json"):
+def insert_schedule_to_db(connection, schedule: Dict[str, Any]):
     try:
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(schedule_data, f, indent=2, default=str, ensure_ascii=False)
-        
-        logger.info(f"✅ Schedule saved to {filename}")
+        with connection.cursor() as cursor:
+            # Prepare insert query
+            insert_query = """
+                INSERT INTO HEAT_MAP.MONTHLY_ADDING_SITE_TABLES 
+                (APPLY_ON, LIST_SITES, IS_ADDED)
+                VALUES (%s, %s, %s)
+            """
+            
+            inserted_count = 0
+            
+            for day_key, day_data in schedule.items():
+                apply_on = day_data['date']
+                
+                site_ids = [site['site_id'] for site in day_data['sites']]
+                list_sites_json = json.dumps(site_ids, ensure_ascii=False)
+                
+                is_added = 0
+                
+                
+                cursor.execute(insert_query, (apply_on, list_sites_json, is_added))
+                inserted_count += 1
+            
+            logger.info(f"✅ Successfully inserted {inserted_count} records into MONTHLY_ADDING_SITE_TABLES")
+            
     except Exception as e:
-        logger.error(f"❌ Error saving schedule to file: {str(e)}")
+        logger.error(f"❌ Error inserting schedule to database: {str(e)}")
+        raise
 
-def print_summary(schedule_data: Dict[str, Any]):
-    print("\n" + "=" * 80)
-    print("📊 SCHEDULE SUMMARY")
-    print("=" * 80)
-    print(f"Total Sites: {schedule_data['total_sites']}")
-    print(f"Days: {schedule_data['days']}")
-    print()
-    print(f"{'Day':<5} {'Date':<12} {'Day of Week':<12} {'Sites Count':<12}")
-    print("-" * 80)
-    
-    for day in range(1, 22):
-        day_key = f"day_{day}"
-        day_info = schedule_data['schedule'][day_key]
-        print(f"{day:<5} {day_info['date']:<12} {day_info['day_of_week']:<12} {day_info['sites_count']:<12}")
-    
-    print("=" * 80)
-    print()
+def get_secret(region):
+    secret_name = os.environ.get('RDS_SECRET_NAME', 'rds/db-test-private')
+    if not secret_name:
+        raise ValueError("Missing environment variable: RDS_SECRET_NAME")
 
-def main():
-    print("\n" + "=" * 80)
-    print("🚀 HeatmapJapan - Site List Processor (Local Version)")
-    print("=" * 80)
-    print()
-    
-    connection = None
-    
-    try:
-        # Step 1: Connect to database
-        logger.info("Step 1: Connecting to database...")
-        connection = get_db_connection()
-        
-        # Step 2: Get all sites
-        logger.info("\nStep 2: Fetching all sites...")
-        sites = get_all_sites(connection)
-        
-        if not sites:
-            logger.warning("⚠️  No active sites found")
-            return
-        
-        # Step 3: Split into 21 sublists
-        logger.info("\nStep 3: Splitting sites into 21-day schedule...")
-        sublists = split_sites_into_21_days(sites)
-        
-        # Step 4: Generate schedule
-        logger.info("\nStep 4: Generating schedule with dates...")
-        schedule = generate_schedule(sublists)
-        
-        # Step 5: Prepare response data
-        schedule_data = {
-            'message': 'Sites successfully split into 21-day schedule',
-            'total_sites': len(sites),
-            'days': 21,
-            'schedule': schedule,
-            'summary': {
-                day: {
-                    'date': info['date'],
-                    'day_of_week': info['day_of_week'],
-                    'sites_count': info['sites_count']
-                }
-                for day, info in schedule.items()
-            }
-        }
-        
-        # Step 6: Print summary
-        print_summary(schedule_data)
-        
-        # Step 7: Save to file
-        logger.info("Step 5: Saving schedule to file...")
-        save_schedule_to_file(schedule_data, "schedule_output.json")
-        
-        # Step 8: Save summary only (smaller file)
-        summary_data = {
-            'total_sites': schedule_data['total_sites'],
-            'days': schedule_data['days'],
-            'summary': schedule_data['summary']
-        }
-        save_schedule_to_file(summary_data, "schedule_summary.json")
-        
-        logger.info("\n✅ Processing completed successfully!")
-        print("\n📁 Output files:")
-        print("   - schedule_output.json (full schedule with all sites)")
-        print("   - schedule_summary.json (summary only)")
-        
-    except Exception as e:
-        logger.error(f"\n❌ Error in main execution: {str(e)}", exc_info=True)
-        return 1
-        
-    finally:
-        # Close database connection
-        if connection:
-            connection.close()
-            logger.info("\n🔒 Database connection closed")
-    
-    return 0
+    logger.info("Creating boto3 client for Secrets Manager...")
+    client = boto3.client('secretsmanager', region_name=region)
+
+    logger.info("Fetching secret value from Secrets Manager...")
+    response = client.get_secret_value(SecretId=secret_name)
+
+    return json.loads(response['SecretString'])
+
+def get_region() -> str:
+    region_name = os.environ.get('AWS_REGION', 'ap-northeast-1')
+    if not region_name:
+        raise ValueError("Missing environment variable: AWS_REGION")
+    return region_name
 
 if __name__ == "__main__":
-    exit(main())
+    exit(lambda_handler())
