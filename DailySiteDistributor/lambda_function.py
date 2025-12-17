@@ -5,6 +5,7 @@ import ssl
 import urllib.request
 import os
 import boto3
+import certifi
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from dotenv import load_dotenv
@@ -18,8 +19,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-RDS_CA_BUNDLE_URL = 'https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem'
 
 def lambda_handler(event=None, context=None):
     cnx = None
@@ -54,51 +53,6 @@ def lambda_handler(event=None, context=None):
             cnx.close()
 
 
-def download_rds_ca_bundle():
-    # Cache trong thư mục hiện tại
-    ca_bundle_path = './rds-ca-bundle.pem'
-    
-    # Check if already downloaded
-    if os.path.exists(ca_bundle_path):
-        logger.info("✅ Using cached RDS CA bundle")
-        return ca_bundle_path
-    
-    try:
-        logger.info(f"📥 Downloading RDS CA bundle from AWS...")
-        logger.info(f"   URL: {RDS_CA_BUNDLE_URL}")
-        
-        # Download CA bundle
-        with urllib.request.urlopen(RDS_CA_BUNDLE_URL) as response:
-            ca_data = response.read()
-        
-        # Write to file
-        with open(ca_bundle_path, 'wb') as f:
-            f.write(ca_data)
-        
-        logger.info("✅ RDS CA bundle downloaded and cached")
-        logger.info(f"   Saved to: {ca_bundle_path}")
-        
-        return ca_bundle_path
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to download CA bundle: {str(e)}")
-        logger.error("\n💡 Alternative: Download manually")
-        logger.error(f"   curl -O {RDS_CA_BUNDLE_URL}")
-        raise
-
-def run_step(step_name: str, func, *args, **kwargs):
-    try:
-        logger.info("")
-        logger.info(f"====== ⏳ START STEP: {step_name} ======")
-        result = func(*args, **kwargs)
-        logger.info(f"====== ✅ DONE STEP: {step_name} ======")
-        logger.info("")
-        return result
-    except Exception as e:
-        logger.error(f"====== ❌ ERROR STEP: {step_name} ======")
-        logger.error(f"Exception: {str(e)}")
-        logger.error("")
-        raise
 
 def get_ssl_context():
     try:
@@ -106,7 +60,7 @@ def get_ssl_context():
         ssl_mode = os.getenv('SSL_MODE', 'VERIFY_CA')
         
         # Download CA bundle
-        ca_bundle_path = download_rds_ca_bundle()
+        ca_bundle_path = certifi.where()
         
         # Create SSL context
         ssl_context = ssl.create_default_context(cafile=ca_bundle_path)
@@ -288,5 +242,19 @@ def get_region() -> str:
         raise ValueError("Missing environment variable: AWS_REGION")
     return region_name
 
+def run_step(step_name: str, func, *args, **kwargs):
+    try:
+        logger.info("")
+        logger.info(f"====== ⏳ START STEP: {step_name} ======")
+        result = func(*args, **kwargs)
+        logger.info(f"====== ✅ DONE STEP: {step_name} ======")
+        logger.info("")
+        return result
+    except Exception as e:
+        logger.error(f"====== ❌ ERROR STEP: {step_name} ======")
+        logger.error(f"Exception: {str(e)}")
+        logger.error("")
+        raise
+
 if __name__ == "__main__":
-    exit(lambda_handler())
+    lambda_handler()
