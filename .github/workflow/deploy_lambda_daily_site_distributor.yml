@@ -1,0 +1,64 @@
+name: Lambda CI
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - DailySiteDistributor/**
+
+env:
+  AWS_REGION: ap-northeast-1
+  PYTHON_VERSION: '3.11'
+  AWS_ACCOUNT_ID: 683918607581
+  GITHUB_OIDC_ROLE: HeatmapJapan-GithubAction
+  LAMBDA_FUNCTION_NAME: HeatmapLambdaSplitSites
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    if: |
+      github.event.pull_request.merged == true && (
+        (github.base_ref == 'develop' && startsWith(github.head_ref, 'feature/')) ||
+        (github.base_ref == 'main' && (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')))
+      )
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set environment variables
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "AWS_ACCOUNT_ID=625344915123" >> $GITHUB_ENV
+
+      - name: Build Lambda package
+        run: |
+          pip install -r requirements.txt -t package
+          cp lambda_function.py package/
+          cd package
+          zip -r ../heatmap_lambda_split_sites.zip . -x "*.pyc" "__pycache__/*"
+          cd ..
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_OIDC_ROLE }}
+          role-duration-seconds: 900
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name $LAMBDA_FUNCTION_NAME \
+            --zip-file fileb://heatmap_lambda_split_sites.zip
