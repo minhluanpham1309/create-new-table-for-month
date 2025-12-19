@@ -2,11 +2,11 @@ import json
 import logging
 import pymysql
 import ssl
-import urllib.request
 import os
 import boto3
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
+import pytz
 from dotenv import load_dotenv
 
 # Load environment variables from .env file only when running locally.
@@ -15,16 +15,10 @@ if not os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
     load_dotenv()
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
-result = {
-        'statusCode': 200,
-        'body': {}
-    }
+SITE_CHUNK_DAYS = int(os.getenv("SITE_CHUNK_DAYS", 21))
 
 def lambda_handler(event=None, context=None):
     cnx = None
@@ -33,58 +27,42 @@ def lambda_handler(event=None, context=None):
 
     try:
         logger.info("Lambda function started")
+
         secret = run_step("get_secret", get_secret, region)
+
         cnx = run_step("get_db_connection", get_db_connection, secret)
         cursor = cnx.cursor()
 
         sites = run_step("get_all_sites", get_all_sites, cnx)
 
-        sublists = run_step("split_sites_into_21_days", split_sites_into_21_days, sites)
+        sublists = run_step("split_into_chunk", split_into_chunk, sites)
 
         schedule = run_step("generate_schedule", generate_schedule, sublists)
 
         run_step("insert_schedule_to_db", insert_schedule_to_db, cnx, schedule)
 
         # Prepare success response
-        result['body'] = {
-            'success': True,
-            'message': 'Schedule created successfully',
-            'stats': {
-                'total_sites': len(sites),
-                'sites_per_day': len(sites) // 21
-            },
-            'timestamp': datetime.now().isoformat()
-        }
+        if cnx:
+            cnx.commit()
 
-        logger.info("✅ Lambda completed successfully")
+        logger.info(f"Lambda completed successfully - total : {len(sites)} sites")
 
     except Exception as e:
         if cnx:
             cnx.rollback()
-        logger.error(f"❌ Error in lambda_handler: {str(e)}", exc_info=True)
-        # Prepare error response
-        result['statusCode'] = 500
-        result['body'] = {
-            'success': False,
-            'error': str(e),
-            'error_type': type(e).__name__,
-            'timestamp': datetime.now().isoformat()
-        }
-    else:
-        if cnx:
-            cnx.commit()
+        logger.error(f"Error in lambda_handler: {str(e)}", exc_info=True)
+        logger.error(f"Event: {json.dumps(event)}")
+        raise
+
     finally:
         if cursor:
             cursor.close()
         if cnx:
             cnx.close()
-    return result
 
 def get_ssl_context(region: str = 'ap-northeast-1'):
     """Create SSL context with TLS 1.2+ (download CA bundle from AWS)"""
     try:
-        ssl_mode = os.getenv('SSL_MODE', 'VERIFY_CA')
-
         ca_file_path = os.path.join(os.path.dirname(__file__), 'certs', f'{region}-bundle.pem')
 
         # Fallback to global bundle if region-specific not found
@@ -101,25 +79,17 @@ def get_ssl_context(region: str = 'ap-northeast-1'):
         ssl_context.load_verify_locations(cafile=ca_file_path)
 
         # Configure verification
-        if ssl_mode == 'SKIP_VERIFY':
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            logger.warning("⚠️  SSL: SKIP_VERIFY")
-        else:
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_REQUIRED
-            logger.info("🔒 SSL: VERIFY_CA")
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_REQUIRED
+        logger.info("🔒 SSL: VERIFY_CA")
 
         # Set minimum TLS 1.2
-        try:
-            ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
-        except AttributeError:
-            pass  # Python < 3.7
+        ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
 
         return ssl_context
 
     except Exception as e:
-        logger.error(f"❌ Failed to create SSL context: {str(e)}")
+        logger.error(f"Failed to create SSL context: {str(e)}")
         raise
 
 def get_db_connection(secret):
@@ -141,25 +111,25 @@ def get_db_connection(secret):
         }
 
         # Connect
-        logger.info("🔌 Connecting to database...")
+        logger.info("Connecting to database...")
         connection = pymysql.connect(**db_config)
-        logger.info("✅ Database connection established")
+        logger.info("Database connection established")
         return connection
 
     except pymysql.err.OperationalError as e:
         error_code = e.args[0] if e.args else None
 
         if error_code == 2003:
-            logger.error("❌ Cannot connect to database server")
+            logger.error("Cannot connect to database server")
         elif error_code == 1045:
-            logger.error("❌ Access denied - check username/password")
+            logger.error("Access denied - check username/password")
         else:
-            logger.error(f"❌ Database connection error: {str(e)}")
+            logger.error(f"Database connection error: {str(e)}")
 
         raise
 
     except Exception as e:
-        logger.error(f"❌ Failed to connect to database: {str(e)}")
+        logger.error(f"Failed to connect to database: {str(e)}")
 
 
 def get_all_sites(connection) -> List[Dict[str, Any]]:
@@ -168,8 +138,6 @@ def get_all_sites(connection) -> List[Dict[str, Any]]:
             query = """
                     SELECT site_id
                     FROM HEAT_MAP.HEATMAP_SITE
-                    WHERE status = 1
-                      AND is_deleted = 0
                     """
 
             logger.info("Executing query to fetch sites...")
@@ -180,51 +148,38 @@ def get_all_sites(connection) -> List[Dict[str, Any]]:
             return sites
 
     except Exception as e:
-        logger.error(f"❌ Error fetching sites: {str(e)}")
+        logger.error(f"Error fetching sites: {str(e)}")
         raise
 
 
-def split_sites_into_21_days(sites: List[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
+def split_into_chunk(sites: List[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
     if not sites:
-        logger.warning("⚠️  No sites to split")
+        logger.warning("No sites to split")
         return {}
 
-    total_sites = len(sites)
-    sites_per_day = total_sites // 21
-    remainder = total_sites % 21
+    logger.info(f"Splitting {len(sites)} sites into {SITE_CHUNK_DAYS} days")
 
-    logger.info(f"📊 Splitting {total_sites} sites into 21 days")
-    logger.info(f"   Base sites per day: {sites_per_day}, Remainder: {remainder}")
+    result = {day: [] for day in range(1, SITE_CHUNK_DAYS + 1)}
 
-    sublists = {}
-    start_idx = 0
+    for i, site in enumerate(sites):
+        result[(i % SITE_CHUNK_DAYS) + 1].append(site)
 
-    for day in range(1, 22):
-        end_idx = start_idx + sites_per_day + (1 if day <= remainder else 0)
-        sublists[day] = sites[start_idx:end_idx]
-        start_idx = end_idx
-
-    return sublists
+    return result
 
 
 def generate_schedule(sublists: Dict[int, List[Dict[str, Any]]]) -> Dict[str, Any]:
-    today = datetime.now()
-    schedule = {}
+    today = datetime.now(pytz.timezone('Asia/Tokyo'))
+    logger.info("Generating schedule...")
 
-    logger.info("📅 Generating schedule...")
-
-    for day in range(1, 22):
-        target_date = today + timedelta(days=day - 1)
-
-        schedule[f"day_{day}"] = {
-            "date": target_date.strftime("%Y-%m-%d"),
-            "day_of_week": target_date.strftime("%A"),
-            "sites_count": len(sublists.get(day, [])),
-            "sites": sublists.get(day, [])
+    return {
+        f"day_{day}": {
+            "date": (date := today + timedelta(days=day - 1)).strftime("%Y-%m-%d"),
+            "day_of_week": date.strftime("%A"),
+            "sites_count": len(sites := sublists.get(day, [])),
+            "sites": sites
         }
-
-    return schedule
-
+        for day in sublists.keys()
+    }
 
 def insert_schedule_to_db(connection, schedule: Dict[str, Any]):
     try:
@@ -246,15 +201,13 @@ def insert_schedule_to_db(connection, schedule: Dict[str, Any]):
                 site_ids = [site['site_id'] for site in day_data['sites']]
                 list_sites_json = json.dumps(site_ids, ensure_ascii=False)
 
-                is_added = 0
-
                 cursor.execute(insert_query, (apply_on, list_sites_json))
                 inserted_count += 1
 
-            logger.info(f"✅ Successfully inserted {inserted_count} records into MONTHLY_ADDING_SITE_TABLES")
+            logger.info(f"Successfully inserted {inserted_count} records into MONTHLY_ADDING_SITE_TABLES")
 
     except Exception as e:
-        logger.error(f"❌ Error inserting schedule to database: {str(e)}")
+        logger.error(f"Error inserting schedule to database: {str(e)}")
         raise
 
 
@@ -283,13 +236,13 @@ def get_region() -> str:
 def run_step(step_name: str, func, *args, **kwargs):
     try:
         logger.info("")
-        logger.info(f"====== ⏳ START STEP: {step_name} ======")
+        logger.info(f"====== START STEP: {step_name} ======")
         result = func(*args, **kwargs)
-        logger.info(f"====== ✅ DONE STEP: {step_name} ======")
+        logger.info(f"====== DONE STEP: {step_name} ======")
         logger.info("")
         return result
     except Exception as e:
-        logger.error(f"====== ❌ ERROR STEP: {step_name} ======")
+        logger.error(f"====== ERROR STEP: {step_name} ======")
         logger.error(f"Exception: {str(e)}")
         logger.error("")
         raise
