@@ -7,6 +7,7 @@ import boto3
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 import pytz
+import numpy as np
 from dotenv import load_dotenv
 
 # Load environment variables from .env file only when running locally.
@@ -18,7 +19,12 @@ if not os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-SITE_CHUNK_DAYS = int(os.getenv("SITE_CHUNK_DAYS", 21))
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+# )
+# logger = logging.getLogger(__name__)
+
 
 def lambda_handler(event=None, context=None):
     cnx = None
@@ -151,29 +157,37 @@ def get_all_sites(connection) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching sites: {str(e)}")
         raise
 
-
 def split_into_chunk(sites: List[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
     if not sites:
-        logger.warning("No sites to split")
-        return {}
+        logger.error("No sites to split...")
+        return {day: [] for day in range(1, SITE_CHUNK_DAYS + 1)}
 
-    logger.info(f"Splitting {len(sites)} sites into {SITE_CHUNK_DAYS} days")
+    n = len(sites)
+    base = n // SITE_CHUNK_DAYS
+    extra = n % SITE_CHUNK_DAYS
 
-    result = {day: [] for day in range(1, SITE_CHUNK_DAYS + 1)}
+    # Create sizes array
+    sizes = np.full(SITE_CHUNK_DAYS, base)
+    sizes[:extra] += 1
 
-    for i, site in enumerate(sites):
-        result[(i % SITE_CHUNK_DAYS) + 1].append(site)
+    # Split
+    indices = np.cumsum(sizes)[:-1]
+    chunks = np.split(sites, indices)
 
-    return result
-
+    # Convert to dict
+    return {day: chunk.tolist() for day, chunk in enumerate(chunks, 1)}
 
 def generate_schedule(sublists: Dict[int, List[Dict[str, Any]]]) -> Dict[str, Any]:
-    today = datetime.now(pytz.timezone('Asia/Tokyo'))
+
+    # Start_date is 01 st every month
+    jst = pytz.timezone('Asia/Tokyo')
+    today = datetime.now(jst)
+    start_date = datetime(today.year, today.month, 1, tzinfo=jst)
     logger.info("Generating schedule...")
 
     return {
         f"day_{day}": {
-            "date": (date := today + timedelta(days=day - 1)).strftime("%Y-%m-%d"),
+            "date": (date := start_date + timedelta(days=day - 1)).strftime("%Y-%m-%d"),
             "day_of_week": date.strftime("%A"),
             "sites_count": len(sites := sublists.get(day, [])),
             "sites": sites
