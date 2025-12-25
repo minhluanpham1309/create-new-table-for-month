@@ -7,6 +7,7 @@ import boto3
 from datetime import datetime
 import pytz
 from dotenv import load_dotenv
+from dateutil.relativedelta import relativedelta
 
 # Load environment variables from .env file only when running locally.
 # In AWS Lambda, environment variables should be configured via the console or IaC.
@@ -30,12 +31,14 @@ jst = pytz.timezone('Asia/Tokyo')
 class ResultCreatedTable:
 
     def __init__(self):
+        self.total_sites = 0
         self.total_sites_success = 0
         self.total_sites_failed = 0
         self.failed_items = []
 
     def to_dict(self):
         return {
+            'total_sites': self.total_sites,
             'total_sites_success': self.total_sites_success,
             'total_sites_failed': self.total_sites_failed,
             'failed_items': self.failed_items
@@ -56,20 +59,7 @@ class SearchDate:
         return self.date.strftime('%Y%m')
 
     def plus_months(self, months: int):
-        new_month = self.date.month + months
-        new_year = self.date.year
-
-        while new_month > 12:
-            new_month -= 12
-            new_year += 1
-
-        try:
-            new_date = self.date.replace(year=new_year, month=new_month)
-        except ValueError:
-            import calendar
-            last_day = calendar.monthrange(new_year, new_month)[1]
-            new_date = self.date.replace(year=new_year, month=new_month, day=last_day)
-
+        new_date = self.date + relativedelta(months=months)
         return SearchDate(new_date)
 
 def lambda_handler(event=None, context=None):
@@ -251,12 +241,8 @@ def find_by_apply_on(connection, apply_on_date: str):
             cursor.execute(query, (apply_on_date,))
             row = cursor.fetchone()
 
-            if row:
-                logger.info(f"Found record ID={row['ID']} for APPLY_ON = {apply_on_date}")
-                return row
-            else:
-                logger.warning(f"No record found for APPLY_ON = {apply_on_date}")
-                return None
+            logger.info(f"Found record ID={row['ID']} for APPLY_ON = {apply_on_date}")
+            return row
 
     except Exception as e:
         logger.error(f"Error in find_by_apply_on: {str(e)}")
@@ -280,29 +266,28 @@ def create_tables_for_sites(cnx, site_list: list, list_hm_site: list, next_month
     result = ResultCreatedTable()
     table_suffixes = ['referrer', 'click', 'read', 'scroll']
 
-    # Convert to set cho O(1) lookup
+    # Convert to set for O(1) lookup
     hm_site_set = set(list_hm_site)
 
     total_sites = len(site_list)
+    result.total_sites = total_sites
     logger.info(f"Processing {total_sites} sites")
 
-    for idx, site_id in enumerate(site_list, 1):
+    for site_id in site_list:
         try:
             if site_id not in hm_site_set:
-                result.total_sites_success += 1
                 continue
 
             for table_suffix in table_suffixes:
                 create_monthly_table(cnx, site_id, table_suffix, next_month)
 
-            cnx.commit()
-            result.total_sites_success += 1
 
         except Exception as e:
             result.total_sites_failed += 1
             result.failed_items.append(site_id)
-            logger.error(f"Error {site_id}: {str(e)}")
+            logger.error(f"Error create_tables_for_sites at {site_id}: {str(e)}", exc_info=True)
 
+    result.total_sites_success = result.total_sites - result.total_sites_failed
     return result
 
 def update_log(cnx, result: ResultCreatedTable, row_id: int):
