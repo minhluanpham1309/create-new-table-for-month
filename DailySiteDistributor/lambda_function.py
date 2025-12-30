@@ -224,7 +224,6 @@ def insert_schedule_to_db(connection, schedule: Dict[str, Any]):
         logger.error(f"Error inserting schedule to database: {str(e)}")
         raise
 
-
 def get_secret(region):
     secret_name = os.environ.get('RDS_SECRET_NAME', 'rds/db-test-private')
 
