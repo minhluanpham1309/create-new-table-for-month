@@ -1,10 +1,11 @@
-name: Lambda CI
+name: Deploy Python Lambda Function
 
 on:
-  push:
+  pull_request:
     branches:
-      - develop
-      - main
+      - 'develop'
+    types:
+      - closed
     paths:
       - DailySiteDistributor/**
 
@@ -17,48 +18,67 @@ env:
 
 jobs:
   deploy:
+    if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'feature/')
     runs-on: ubuntu-latest
-
-    if: |
-      github.event.pull_request.merged == true && (
-        (github.base_ref == 'develop' && startsWith(github.head_ref, 'feature/')) ||
-        (github.base_ref == 'main' && (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')))
-      )
-
     permissions:
       id-token: write
       contents: read
 
     steps:
-      - uses: actions/checkout@v3
+    - uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
 
-      - name: Set environment variables
-        run: |
-          if [ "${{ github.ref_name }}" = "main" ]; then
-            echo "AWS_ACCOUNT_ID=625344915123" >> $GITHUB_ENV
+    - name: Download RDS SSL Certificate
+      run: |
+        cd lambda-function
+        mkdir -p certs
+        curl -o certs/${{ env.AWS_REGION }}-bundle.pem \
+          https://truststore.pki.rds.amazonaws.com/${{ env.AWS_REGION }}/${{ env.AWS_REGION }}-bundle.pem
 
-      - name: Build Lambda package
-        run: |
-          pip install -r requirements.txt -t package
-          cp lambda_function.py package/
-          cd package
-          zip -r ../heatmap_lambda_split_sites.zip . -x "*.pyc" "__pycache__/*"
-          cd ..
+    - name: Build Lambda package
+      run: |
+        cd lambda-function
+        mkdir -p build
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt -t build/ --upgrade
+        fi
+        cp -r *.py build/
+        cp -r certs build/
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_OIDC_ROLE }}
-          role-duration-seconds: 900
-          aws-region: ${{ env.AWS_REGION }}
+    - name: Create deployment package
+      run: |
+        cd lambda-function/build
+        zip -r ../deployment-package.zip . -x "*.pyc" -x "*__pycache__*" -x "*.dist-info/*"
 
-      - name: Deploy Lambda
-        run: |
-          aws lambda update-function-code \
-            --function-name $LAMBDA_FUNCTION_NAME \
-            --zip-file fileb://heatmap_lambda_split_sites.zip
+    - name: Cleanup downloaded certificate
+      run: rm -rf lambda-function/certs/
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_OIDC_ROLE }}
+        role-duration-seconds: 900
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Deploy to AWS Lambda
+      run: |
+        aws lambda update-function-code \
+          --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+          --zip-file fileb://lambda-function/deployment-package.zip \
+          --publish
+
+    - name: Wait for Lambda update
+      run: |
+        aws lambda wait function-updated \
+          --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+        echo "Deployment successful!"
+
+    - name: Cleanup build artifacts
+      if: always()
+      run: |
+        rm -rf lambda-function/build/
+        rm -f lambda-function/deployment-package.zip
