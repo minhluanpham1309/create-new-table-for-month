@@ -4,7 +4,6 @@ pymysql==1.1.0
 # Environment Variables Management
 python-dotenv==1.0.0
 
-# Optional: AWS SDK
 boto3==1.34.34
 
 pytz==2024.1
