@@ -1,7 +1,6 @@
 # MySQL Database Connection
 pymysql==1.1.0
 
-# Environment Variables Management
 python-dotenv==1.0.0
 
 boto3==1.34.34
