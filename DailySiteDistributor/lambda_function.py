@@ -25,6 +25,7 @@ logger.setLevel(logging.INFO)
 # )
 # logger = logging.getLogger(__name__)
 
+SITE_CHUNK_DAYS = int(os.getenv("SITE_CHUNK_DAYS", 21))
 
 def lambda_handler(event=None, context=None):
     cnx = None
