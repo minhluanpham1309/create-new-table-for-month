@@ -50,15 +50,70 @@ CREATE TABLE HEAT_MAP.MONTHLY_ADDING_SITE_TABLES (
 
 ## 📁 Project Structure
 ```
-monthly-site-scheduler/
+HeatmapJapan/
 ├── .github/
 │   └── workflows/
-│       └── deploy-lambda.yml      # GitHub Actions workflow
-├── lambda_function.py              # Main Lambda function
-├── requirements.txt                # Python dependencies
-├── .gitignore                      # Git ignore file
-├── .env.example                    # Environment variables template
-└── README.md                       # This file
+│       ├── deploy-monthly-adding-site-tables-producer-lambda.yml
+│       └── deploy-monthly-adding-site-tables-consumer-lambda.yml
+├── HeatmapJapanCronServerless/
+│   ├── MonthlyAddingSiteTablesProducer
+│   │   └── lambda
+│   │        ├── lamda-function.py               # Main Lambda function
+│   │        ├── requirements.txt                # Python dependencies
+│   │        └── .env.example                    # Environment variables template
+│   ├── MonthlyAddingSiteTablesProducer
+│   │   ├── lambda
+│   │   │   ├── lamda-function.py.py            # Main Lambda function
+│   │   │   ├── requirements.txt                # Python dependencies
+│   │   │   └── .env.example                    # Environment variables template
+│   │   └── step-function
+│   │       └── deploy-monthly-adding-site-tables-consumer.json
+│   └── README.md                       # This file
+└── terraform
+    ├── README.md
+    ├── main.tf
+    ├── variables.tf
+    ├── shared
+    │   ├── backend-dev.conf
+    │   └── backend-prod.conf
+    ├── environments
+    │   ├── dev
+    │   │   ├── main.tf
+    │   │   ├── variables.tf
+    │   │   └── outputs.tf
+    │   └── prod
+    │       ├── main.tf
+    │       ├── variables.tf
+    │       └── outputs.tf
+    └── modules
+        ├── common
+        │   ├── main.tf
+        │   ├── variables.tf
+        │   └── outputs.tf
+        ├── lambda-function
+        │   ├── main.tf
+        │   ├── variables.tf
+        │   └── outputs.tf
+        ├── step-function
+        │   ├── main.tf
+        │   ├── variables.tf
+        │   └── outputs.tf
+        ├── eventbridge-rule
+        │   ├── main.tf
+        │   ├── variables.tf
+        │   └── outputs.tf
+        ├── iam
+        │   ├── main.tf
+        │   ├── variables.tf
+        │   └── outputs.tf
+        ├── monthly-adding-site-tables-producer
+        │   ├── main.tf
+        │   ├── variables.tf
+        │   └── outputs.tf
+        └── monthly-adding-site-tables-consumer
+            ├── main.tf
+            ├── variables.tf
+            └── outputs.tf
 ```
 
 ## 🚀 Deployment
