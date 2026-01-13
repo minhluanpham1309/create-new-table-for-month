@@ -124,16 +124,14 @@ variable "lambda_functions" {
 variable "step_functions" {
   description = "Map of Step Functions to create"
   type = map(object({
-    name         = string
-    definition   = string
-    lambda_arns  = list(string)
-    tags         = optional(map(string))
-    state_machine_type = optional(string, "STANDARD")
-    custom_policy_json = optional(string)
-    enable_logging     = optional(bool, true)
-    log_level                = optional(string, "OFF")
-    log_include_execution_data = optional(bool, false)
-    log_retention_in_days      = optional(number, 7)
+    name                  = string
+    definition            = string
+    tags                  = optional(map(string))
+    state_machine_type    = optional(string, "STANDARD")
+    enable_logging        = optional(bool, true)
+    log_level             = optional(string, "OFF")
+    log_retention_in_days = optional(number, 7)
+    execution_role_arn    = optional(string)
   }))
   default = {}
 }

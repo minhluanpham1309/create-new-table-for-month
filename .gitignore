@@ -74,3 +74,4 @@ Thumbs.db
 
 # other
 /DailySiteDistributor/.env
+/terraform/examples/lambda-basic/.terraform/modules/modules.json

@@ -75,23 +75,24 @@ module "lambda_functions" {
   tags = var.tags
 }
 
-# # Step Function Module
-# module "step_function" {
-#   source   = "./modules/step-functions"
-#   for_each = var.step_functions
-#
-#   project_name         = var.project_name
-#   name                 = each.value.name
-#   definition           = each.value.definition
-#   tags                 = each.value.tags != null ? each.value.tags : var.tags
-#   state_machine_type   = each.value.state_machine_type
-#   custom_policy_json   = each.value.custom_policy_json
-#   enable_logging       = each.value.enable_logging
-#   log_level            = each.value.log_level
-#   log_include_execution_data = each.value.log_include_execution_data
-#   log_retention_in_days = each.value.log_retention_in_days
-# }
-#
+# Step Function Module
+module "step_function" {
+  source   = "./modules/step-functions"
+  for_each = var.step_functions
+
+  project_name         = var.project_name
+  name                 = each.value.name
+  definition           = each.value.definition
+
+  state_machine_type   = each.value.state_machine_type
+  enable_logging       = each.value.enable_logging
+  log_level            = each.value.log_level
+  log_retention_in_days = each.value.log_retention_in_days
+  execution_role_arn    = try(each.value.execution_role_arn, null)
+
+  tags                 = var.tags
+}
+
 # # EventBridge Rule Module
 # module "eventbridge_rule" {
 #   source   = "./modules/eventbridge-rule"
