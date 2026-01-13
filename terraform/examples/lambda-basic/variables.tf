@@ -33,8 +33,3 @@ variable "sns_topic_arn" {
   type        = string
   default     = null
 }
-
-variable "eventbridge_invoke_sfn_role_arn" {
-  description = "ARN of IAM role for EventBridge to invoke Step Function (must allow states:StartExecution)"
-  type        = string
-}

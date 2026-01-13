@@ -92,8 +92,3 @@ variable "role_arn" {
   default     = null
 }
 
-variable "rds_security_group_ids" {
-  description = "List of RDS security group IDs for Lambda ingress rules"
-  type        = list(string)
-  default     = []
-}

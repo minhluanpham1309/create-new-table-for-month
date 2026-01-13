@@ -9,6 +9,10 @@ resource "aws_cloudwatch_log_group" "lambda" {
       Name = "${var.project_name}-${var.function_name}-logs"
     }
   )
+
+  lifecycle {
+    ignore_changes = [retention_in_days]
+  }
 }
 
 # Create dummy zip file

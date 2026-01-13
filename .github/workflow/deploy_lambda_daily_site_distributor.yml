@@ -14,7 +14,7 @@ env:
   PYTHON_VERSION: '3.11'
   AWS_ACCOUNT_ID: 683918607581
   GITHUB_OIDC_ROLE: HeatmapJapan-GithubAction
-  LAMBDA_FUNCTION_NAME: HeatmapLambdaSplitSites
+  LAMBDA_FUNCTION_NAME: heatmap-japan-HeatmapLambdaSplitSites
 
 jobs:
   deploy:

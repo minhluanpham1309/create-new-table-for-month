@@ -116,8 +116,6 @@ variable "lambda_functions" {
       subnet_ids         = list(string)
       security_group_ids = list(string)
     }))
-    enable_cloudwatch_alarms = optional(bool, false)
-    rds_security_group_ids = optional(list(string), [])
   }))
   default = {}
 }
@@ -161,8 +159,3 @@ variable "eventbridge_rules" {
   default = {}
 }
 
-variable "rds_security_group_ids" {
-  description = "List of RDS security group IDs for Lambda ingress rules"
-  type        = list(string)
-  default     = []
-}

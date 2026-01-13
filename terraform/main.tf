@@ -4,7 +4,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = ">= 5.29.0"
     }
   }
 }
@@ -71,8 +71,6 @@ module "lambda_functions" {
 
   create_security_group = try(each.value.create_security_group, false)
   vpc_config            = each.value.vpc_config
-  
-  enable_cloudwatch_alarms = try(each.value.enable_cloudwatch_alarms, false)
 
   tags = var.tags
 }
