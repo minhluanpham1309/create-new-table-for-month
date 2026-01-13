@@ -138,22 +138,57 @@ variable "step_functions" {
 
 variable "eventbridge_rules" {
   type = map(object({
-    name                = string
-    description         = optional(string)
-    schedule_expression = string
-    enabled             = optional(bool, true)
-    time_zone           = optional(string)
-    scheduler_retry_policy = optional(object({
-      maximum_event_age_in_seconds = optional(number)
-      maximum_retry_attempts       = optional(number)
-    }))
-    targets = map(object({
+    name                          = string
+    description                   = optional(string)
+    schedule_expression           = string
+    enabled                       = optional(bool, true)
+    schedule_expression_timezone  = optional(string, "UTC")
+    scheduler_role_arn            = optional(string)
+    target = object({
       type  = string  # "lambda" | "step_functions" | "sns"
       arn   = string
       input = optional(any)
-    }))
-    tags = optional(map(string))
+    })
   }))
   default = {}
 }
 
+# Monthly Adding Site Tables Producer (Lambda + EventBridge Scheduler)
+# variable "monthly_adding_site_tables_producers" {
+#   description = "Map of monthly-adding-site-tables-producer module instances"
+#   type = map(object({
+#     # Lambda
+#     lambda_function_name          = string
+#     lambda_handler                = optional(string, "lambda_function.lambda_handler")
+#     lambda_runtime                = optional(string, "python3.11")
+#     lambda_timeout                = optional(number, 900)
+#     lambda_memory_size            = optional(number, 256)
+#     lambda_architectures          = optional(list(string), ["x86_64"])
+#     lambda_filename               = optional(string)
+#     lambda_source_code_hash       = optional(string)
+#     lambda_environment_variables  = optional(map(string), {})
+#     lambda_role_arn               = string
+#     lambda_log_retention_in_days  = optional(number, 7)
+#
+#     # Optional VPC
+#     vpc_config = optional(object({
+#       vpc_id             = string
+#       subnet_ids         = list(string)
+#       security_group_ids = list(string)
+#     }))
+#     create_security_group = optional(bool, false)
+#
+#     # Scheduler
+#     schedule_name                 = string
+#     schedule_rule_name            = optional(string)
+#     schedule_description          = optional(string)
+#     schedule_expression           = optional(string, "cron(0 9 * * ? *)")
+#     schedule_expression_timezone  = optional(string, "Asia/Tokyo")
+#     schedule_enabled              = optional(bool, true)
+#     scheduler_role_arn            = string
+#     schedule_input                = optional(any, {})
+#
+#     tags = optional(map(string), {})
+#   }))
+#   default = {}
+# }

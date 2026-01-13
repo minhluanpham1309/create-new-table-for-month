@@ -93,20 +93,53 @@ module "step_function" {
   tags                 = var.tags
 }
 
-# # EventBridge Rule Module
-# module "eventbridge_rule" {
-#   source   = "./modules/eventbridge-rule"
-#   for_each = var.eventbridge_rules
+# EventBridge Rule Module
+module "eventbridge_rule" {
+  source   = "modules/eventbridge-scheduler"
+  for_each = var.eventbridge_rules
+
+  project_name                  = var.project_name
+  name                          = each.value.name
+  description                   = each.value.description
+  schedule_expression           = each.value.schedule_expression
+  enabled                       = each.value.enabled
+  schedule_expression_timezone  = try(each.value.schedule_expression_timezone, "Asia/Tokyo")
+  scheduler_role_arn            = try(each.value.scheduler_role_arn, null)
+
+  target = each.value.target
+}
+
+# Monthly Adding Site Tables Producer (Lambda + EventBridge Scheduler)
+# module "monthly_adding_site_tables_producer" {
+#   source   = "./modules/monthly-adding-site-tables-producer"
+#   for_each = var.monthly_adding_site_tables_producers
 #
-#   project_name                  = var.project_name
-#   name                          = each.value.name
-#   description                   = each.value.description
-#   schedule_expression           = each.value.schedule_expression
-#   enabled                       = each.value.enabled
-#   schedule_expression_timezone  = try(each.value.time_zone, "UTC")
-#   scheduler_retry_policy = try(each.value.scheduler_retry_policy, {})
+#   project_name = var.project_name
+#   environment  = var.environment
 #
-#   targets = each.value.targets
+#   lambda_function_name         = each.value.lambda_function_name
+#   lambda_handler               = try(each.value.lambda_handler, "lambda_function.lambda_handler")
+#   lambda_runtime               = try(each.value.lambda_runtime, "python3.11")
+#   lambda_timeout               = try(each.value.lambda_timeout, 900)
+#   lambda_memory_size           = try(each.value.lambda_memory_size, 256)
+#   lambda_architectures         = try(each.value.lambda_architectures, ["x86_64"])
+#   lambda_filename              = try(each.value.lambda_filename, null)
+#   lambda_source_code_hash      = try(each.value.lambda_source_code_hash, null)
+#   lambda_environment_variables = try(each.value.lambda_environment_variables, {})
+#   lambda_role_arn              = each.value.lambda_role_arn
+#   lambda_log_retention_in_days = try(each.value.lambda_log_retention_in_days, 7)
 #
-#   tags = each.value.tags != null ? each.value.tags : var.tags
+#   vpc_config            = try(each.value.vpc_config, null)
+#   create_security_group = try(each.value.create_security_group, false)
+#
+#   schedule_name                = each.value.schedule_name
+#   schedule_rule_name           = try(each.value.schedule_rule_name, null)
+#   schedule_description         = try(each.value.schedule_description, null)
+#   schedule_expression          = try(each.value.schedule_expression, "cron(0 9 * * ? *)")
+#   schedule_expression_timezone = try(each.value.schedule_expression_timezone, "Asia/Tokyo")
+#   schedule_enabled             = try(each.value.schedule_enabled, true)
+#   scheduler_role_arn           = each.value.scheduler_role_arn
+#   schedule_input               = try(each.value.schedule_input, {})
+#
+#   tags = merge(var.tags, try(each.value.tags, {}))
 # }

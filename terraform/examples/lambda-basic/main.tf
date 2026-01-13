@@ -64,6 +64,24 @@ module "heatmap_japan_dev" {
       enable_logging     = false
     }
   }
+
+  # EventBridge Scheduler to trigger Step Function daily at 9 AM Tokyo time
+  eventbridge_rules = {
+    daily_step_function_trigger = {
+      name                          = "invoke-step-function-daily"
+      description                   = "Trigger Step Function at 9:00 Asia/Tokyo every day using EventBridge Scheduler"
+      schedule_expression           = "cron(0 9 * * ? *)"
+      schedule_expression_timezone  = "Asia/Tokyo"
+      enabled                       = true
+      scheduler_role_arn            = "arn:aws:iam::683918607581:role/service-role/Amazon_EventBridge_Scheduler_SFN_eb896e981c"
+
+      target = {
+        type  = "lambda"
+        arn   = module.heatmap_japan_dev.lambda_functions["HeatmapLambdaSplitSites"].function_arn
+        input = {}
+      }
+    }
+  }
 }
 #
 # locals {

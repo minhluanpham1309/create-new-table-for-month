@@ -37,13 +37,17 @@ output "step_functions" {
   }
 }
 
-# EventBridge Rule outputs
-# output "eventbridge_rules" {
-#   description = "EventBridge Scheduler information"
+
+
+# Monthly Adding Site Tables Producer outputs
+# output "monthly_adding_site_tables_producers" {
+#   description = "Monthly adding site tables producer info (Lambda + Scheduler)"
 #   value = {
-#     for k, v in module.eventbridge_rule : k => {
-#       scheduler_arn = v.scheduler_arn
-#       scheduler_id  = v.scheduler_id
+#     for k, v in module.monthly_adding_site_tables_producer : k => {
+#       lambda_function_name = v.lambda_function_name
+#       lambda_function_arn  = v.lambda_function_arn
+#       schedule_arn         = v.schedule_arn
+#       schedule_id          = v.schedule_id
 #     }
 #   }
 # }
