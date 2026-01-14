@@ -63,8 +63,15 @@ variable "lambda_environment_variables" {
 }
 
 variable "lambda_role_arn" {
-  description = "IAM role ARN for lambda"
+  description = "IAM role ARN for lambda. If null, module will auto-create with policies from lambda_inline_policies"
   type        = string
+  default     = null
+}
+
+variable "lambda_inline_policies" {
+  description = "Map of inline policy names to policy documents (JSON string) for Lambda role. Only used when lambda_role_arn is null"
+  type        = map(string)
+  default     = {}
 }
 
 variable "lambda_log_retention_in_days" {
@@ -118,13 +125,20 @@ variable "schedule_enabled" {
   default     = true
 }
 
-variable "scheduler_role_arn" {
-  description = "IAM role ARN for EventBridge Scheduler"
-  type        = string
-}
-
 variable "schedule_input" {
   description = "Optional input payload for the target"
   type        = any
+  default     = {}
+}
+
+variable "scheduler_role_arn" {
+  description = "IAM role ARN for EventBridge Scheduler. If null, module will auto-create with invoke-lambda permission"
+  type        = string
+  default     = null
+}
+
+variable "scheduler_inline_policies" {
+  description = "Additional inline policies for Scheduler role (invoke-lambda is auto-added). Only used when scheduler_role_arn is null"
+  type        = map(string)
   default     = {}
 }

@@ -15,23 +15,6 @@ variable "project_name" {
   default     = "heatmap-japan"
 }
 
-# Commented out - Valkey related variables
-# variable "vpc_id" {
-#   description = "Existing VPC ID"
-#   type        = string
-# }
-# 
-# variable "subnet_ids" {
-#   description = "Existing subnet IDs for Valkey"
-#   type        = list(string)
-# }
-# 
-# variable "allowed_security_group_ids" {
-#   description = "Security group IDs of EC2 instances allowed to access Valkey"
-#   type        = list(string)
-#   default     = []
-# }
-
 variable "tags" {
   description = "Additional tags"
   type        = map(string)
@@ -56,7 +39,7 @@ variable "step_functions" {
 
 # Monthly Adding Site Tables Producer (Lambda + EventBridge Scheduler)
 variable "monthly_adding_site_tables_producers" {
-  description = "Map of monthly-adding-site-tables-producer module instances"
+  description = "Configuration for monthly-adding-site-tables-producer"
   type = object({
     # Lambda
     lambda_function_name         = string
@@ -68,8 +51,11 @@ variable "monthly_adding_site_tables_producers" {
     lambda_filename              = optional(string, null)
     lambda_source_code_hash      = optional(string, null)
     lambda_environment_variables = optional(map(string), {})
-    lambda_role_arn              = string
     lambda_log_retention_in_days = optional(number, 7)
+
+    # Lambda IAM Role (Auto-create if null)
+    lambda_role_arn           = optional(string, null)
+    lambda_inline_policies    = optional(map(string), {})
 
     # Optional VPC
     vpc_config = optional(object({
@@ -79,15 +65,19 @@ variable "monthly_adding_site_tables_producers" {
     }))
     create_security_group = optional(bool, false)
 
-    # Scheduler
+    # EventBridge Scheduler
     schedule_name                = string
     schedule_description         = optional(string, "Trigger monthly-adding-site-tables-producer on a schedule")
     schedule_expression          = optional(string, "cron(0 9 * * ? *)")
     schedule_expression_timezone = optional(string, "Asia/Tokyo")
     schedule_enabled             = optional(bool, true)
-    scheduler_role_arn           = string
     schedule_input               = optional(any, {})
 
+    # Scheduler IAM Role (Auto-create if null)
+    scheduler_role_arn           = optional(string, null)
+    scheduler_inline_policies    = optional(map(string), {})
+
+    # Tags
     tags = optional(map(string), {})
   })
 

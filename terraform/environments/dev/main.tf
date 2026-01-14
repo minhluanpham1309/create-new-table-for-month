@@ -1,3 +1,6 @@
+variable "lambda_function_name" {
+  default = "MonthlyAddingSiteTablesProducer"
+}
 module "heatmap_japan_dev" {
   source = "../../"
 
@@ -9,7 +12,7 @@ module "heatmap_japan_dev" {
   # Lambda functions configuration (if needed)
   monthly_adding_site_tables_producers = {
     # Lambda function configuration
-    lambda_function_name = "MonthlyAddingSiteTablesProducer"
+    lambda_function_name = var.lambda_function_name
     lambda_handler       = "lambda_function.lambda_handler"
     lambda_runtime       = "python3.11"
 
@@ -21,10 +24,34 @@ module "heatmap_japan_dev" {
       RDS_SECRET_NAME = "rds/db-test-private"
     }
 
-    # Replace these ARNs with your IAM roles
-    lambda_role_arn    = "arn:aws:iam::683918607581:role/excute-lambda"
+    lambda_inline_policies = {
+      "rds-secrets" = jsonencode({
+        Version = "2012-10-17"
+        Statement = [{
+          Sid      = "ReadRDSSecrets"
+          Effect   = "Allow"
+          Action   = ["secretsmanager:GetSecretValue"]
+          Resource = "arn:aws:secretsmanager:ap-northeast-1:683918607581:secret:rds/db-test-private*"
+        }]
+      })
+      cloudwatch-logs-access = jsonencode({
+        Version = "2012-10-17"
+        Statement = [
+          {
+            Sid    = "CloudWatchLogsAccess"
+            Effect = "Allow"
+            Action = [
+              "logs:CreateLogGroup",
+              "logs:CreateLogStream",
+              "logs:PutLogEvents"
+            ]
+            Resource = "*"
+          }
+        ]
+      })
+    }
 
-    # Optional VPC config (set to your VPC/subnets/SGs or omit)
+    # VPC config
     create_security_group = false
     vpc_config = {
       vpc_id             = "vpc-08586cd9f6ce3a905"
@@ -33,13 +60,23 @@ module "heatmap_japan_dev" {
     }
 
     # Scheduler configuration
-    scheduler_role_arn = "arn:aws:iam::683918607581:role/service-role/Amazon_EventBridge_Scheduler_SFN_eb896e981c"
-
     schedule_name                = "monthly-adding-site-tables-producer-schedule"
     schedule_description         = "Trigger monthly-adding-site-tables-producer on a schedule"
     schedule_expression          = "cron(20 0 1 * ? *)"
     schedule_expression_timezone = "Asia/Tokyo"
     schedule_enabled             = true
+
+    scheduler_inline_policies = {
+        "invoke-lambda" = jsonencode({
+            Version = "2012-10-17"
+            Statement = [{
+              Sid      = "InvokeLambdaFunction"
+              Effect   = "Allow"
+              Action   = ["lambda:InvokeFunction"]
+              Resource = ["arn:aws:lambda:ap-northeast-1:683918607581:function:${var.lambda_function_name}"]
+            }]
+        })
+    }
 
     # Optional payload
     schedule_input = {}
