@@ -75,3 +75,7 @@ Thumbs.db
 # other
 /DailySiteDistributor/.env
 /terraform/examples/lambda-basic/.terraform/modules/modules.json
+./.terraform/
+/terraform/modules/lambda-function/.terraform/
+/terraform/environments/dev/terraform.dev.plan
+terraform/environments/dev/.terraform.lock.hcl
