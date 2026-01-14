@@ -1,6 +1,6 @@
 terraform {
   backend "s3" {
-    bucket         = "faber-terraform-state-develop"
+    bucket         = "faber-terraform-state-develop-aws-683918607581"
     key            = "heatmap-japan/dev/terraform.tfstate"
     region         = "ap-northeast-1"
     encrypt        = true

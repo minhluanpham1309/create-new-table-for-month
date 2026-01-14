@@ -1,13 +1,3 @@
-# Reusable "monthly-adding-site-tables-producer" module (Lambda + EventBridge Scheduler)
-locals {
-  composed_lambda_env = merge(
-    {
-      ENVIRONMENT = var.environment
-    },
-    var.lambda_environment_variables
-  )
-}
-
 module "lambda" {
   source = "../lambda-function"
 
@@ -24,7 +14,7 @@ module "lambda" {
   filename         = var.lambda_filename
   source_code_hash = var.lambda_source_code_hash
 
-  environment_variables = local.composed_lambda_env
+  environment_variables = var.lambda_environment_variables
 
   role_arn = var.lambda_role_arn
 
@@ -40,13 +30,12 @@ module "schedule" {
 
   project_name = var.project_name
 
-  name                        = var.schedule_name
-  rule_name                   = var.schedule_rule_name
-  description                 = var.schedule_description
-  schedule_expression         = var.schedule_expression
+  name                         = var.schedule_name
+  description                  = var.schedule_description
+  schedule_expression          = var.schedule_expression
   schedule_expression_timezone = var.schedule_expression_timezone
-  enabled                     = var.schedule_enabled
-  scheduler_role_arn          = var.scheduler_role_arn
+  enabled                      = var.schedule_enabled
+  scheduler_role_arn           = var.scheduler_role_arn
 
   target = {
     type  = "lambda"
@@ -54,3 +43,4 @@ module "schedule" {
     input = var.schedule_input
   }
 }
+

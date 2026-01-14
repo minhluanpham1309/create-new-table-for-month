@@ -66,9 +66,9 @@ variable "scheduler_role_arn" {
 variable "target" {
   description = "Target configuration for the EventBridge schedule"
   type = object({
-    type      = string  # "lambda" | "step_functions" | "sns"
-    arn       = string
-    input     = optional(any)
+    type  = string # "lambda" | "step_functions" | "sns"
+    arn   = string
+    input = optional(any)
   })
 
   default = null

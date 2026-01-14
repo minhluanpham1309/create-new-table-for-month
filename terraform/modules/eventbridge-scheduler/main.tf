@@ -6,8 +6,8 @@
 
 # Scheduler support (EventBridge Scheduler)
 resource "aws_scheduler_schedule" "this" {
-  name                         = "${var.project_name}-${var.name}"
-  description                  = var.description
+  name        = var.name
+  description = var.description
 
   flexible_time_window {
     mode = "OFF"

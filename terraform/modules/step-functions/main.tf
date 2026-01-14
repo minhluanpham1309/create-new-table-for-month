@@ -30,8 +30,8 @@ resource "aws_sfn_state_machine" "this" {
   dynamic "logging_configuration" {
     for_each = var.enable_logging ? [1] : []
     content {
-      log_destination        = "${aws_cloudwatch_log_group.step_functions[0].arn}:*"
-      level                  = var.log_level
+      log_destination = "${aws_cloudwatch_log_group.step_functions[0].arn}:*"
+      level           = var.log_level
     }
   }
 

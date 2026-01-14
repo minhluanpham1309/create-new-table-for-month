@@ -3,11 +3,6 @@ variable "project_name" {
   type        = string
 }
 
-variable "environment" {
-  description = "Environment name (e.g. dev, prod)"
-  type        = string
-}
-
 variable "tags" {
   description = "Additional tags"
   type        = map(string)
@@ -97,12 +92,6 @@ variable "create_security_group" {
 variable "schedule_name" {
   description = "Logical schedule name (will be prefixed by project_name unless rule_name is provided)"
   type        = string
-}
-
-variable "schedule_rule_name" {
-  description = "Optional full schedule name override"
-  type        = string
-  default     = null
 }
 
 variable "schedule_description" {
