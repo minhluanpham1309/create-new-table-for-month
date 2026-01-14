@@ -25,12 +25,12 @@ output "state_machine_status" {
 
 output "role_arn" {
   description = "ARN of the IAM role for Step Functions"
-  value       = var.execution_role_arn != null ? var.execution_role_arn : (length(aws_iam_role.step_functions) > 0 ? aws_iam_role.step_functions[0].arn : null)
+  value       = var.execution_role_arn != null
 }
 
 output "role_name" {
   description = "Name of the IAM role for Step Functions"
-  value       = var.execution_role_arn != null ? null : (length(aws_iam_role.step_functions) > 0 ? aws_iam_role.step_functions[0].name : null)
+  value       = var.execution_role_arn != null
 }
 
 output "log_group_name" {

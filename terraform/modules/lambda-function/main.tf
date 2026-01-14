@@ -18,7 +18,7 @@ resource "aws_cloudwatch_log_group" "lambda" {
 # Create dummy zip file
 data "archive_file" "dummy" {
   type        = "zip"
-  output_path = "${path.module}/.terraform/dummy-${var.function_name}.zip"
+  output_path = "${path.module}/.terraform/dummy.zip"
 
   source {
     filename = "lambda_function.py"
@@ -29,7 +29,7 @@ data "archive_file" "dummy" {
 # Security Group for Lambda (if VPC is configured)
 resource "aws_security_group" "lambda" {
   count       = var.vpc_config != null && var.create_security_group ? 1 : 0
-  name_prefix = "${var.project_name}-${var.function_name}-"
+  name_prefix = "${var.function_name}-"
   vpc_id      = var.vpc_config.vpc_id
   description = "Security group for Lambda function ${var.function_name}"
 
@@ -48,7 +48,7 @@ resource "aws_security_group" "lambda" {
 
 # Lambda Function
 resource "aws_lambda_function" "this" {
-  function_name = "${var.project_name}-${var.function_name}"
+  function_name = var.function_name
   role          = var.role_arn
   handler       = var.handler
   runtime       = var.runtime

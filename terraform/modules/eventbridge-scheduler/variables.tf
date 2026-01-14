@@ -33,6 +33,11 @@ variable "schedule_expression" {
   description = "Schedule expression (e.g., 'rate(5 minutes)' or 'cron(0 9 * * ? *)')"
   type        = string
   default     = null
+
+  validation {
+    condition     = var.schedule_expression != null && trimspace(var.schedule_expression) != ""
+    error_message = "schedule_expression must be provided and non-empty."
+  }
 }
 
 variable "enabled" {
@@ -41,26 +46,12 @@ variable "enabled" {
   default     = true
 }
 
-variable "enable_scheduler" {
-  description = "If true, use EventBridge Scheduler (aws_scheduler_schedule)"
-  type        = bool
-  default     = false
-}
-
-variable "time_zone" {
+variable "schedule_expression_timezone" {
   description = "Time zone for EventBridge Scheduler (e.g. 'Asia/Ho_Chi_Minh'). Default is UTC."
   type        = string
-  default     = "UTC"
+  default     = "Asia/Tokyo"
 }
 
-variable "scheduler_retry_policy" {
-  description = "Retry policy for EventBridge Scheduler. Object with maximum_event_age_in_seconds and maximum_retry_attempts."
-  type = object({
-    maximum_event_age_in_seconds = optional(number)
-    maximum_retry_attempts       = optional(number)
-  })
-  default = {}
-}
 
 variable "scheduler_role_arn" {
   description = "IAM role ARN for EventBridge Scheduler (must allow scheduler.amazonaws.com and permission to invoke target)"
@@ -71,24 +62,14 @@ variable "scheduler_role_arn" {
 # ============================================================================
 # TARGETS CONFIGURATION
 # ============================================================================
-# This is the KEY improvement - single interface for all target types!
-
-variable "targets" {
-  type = map(object({
+# EventBridge Scheduler supports a single target per schedule
+variable "target" {
+  description = "Target configuration for the EventBridge schedule"
+  type = object({
     type      = string  # "lambda" | "step_functions" | "sns"
     arn       = string
     input     = optional(any)
-  }))
+  })
 
-  default = {}
-}
-
-# ============================================================================
-# TAGS
-# ============================================================================
-
-variable "tags" {
-  description = "Additional tags to apply to all resources"
-  type        = map(string)
-  default     = {}
+  default = null
 }

@@ -116,7 +116,7 @@ HeatmapJapan/
             └── outputs.tf
 ```
 
-## 🚀 Deployment
+## 🚀 Deployment 
 
 ### Prerequisites
 

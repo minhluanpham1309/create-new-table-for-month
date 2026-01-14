@@ -21,29 +21,33 @@ output "lambda_functions" {
 }
 
 # Step Function outputs (map)
-# output "step_functions" {
-#   description = "Step Function state machine information (map)"
-#   value = {
-#     for name, sfn in module.step_function : name => {
-#       state_machine_name         = sfn.state_machine_name
-#       state_machine_arn          = sfn.state_machine_arn
-#       state_machine_id           = sfn.state_machine_id
-#       state_machine_creation_date = sfn.state_machine_creation_date
-#       state_machine_status       = sfn.state_machine_status
-#       role_arn                   = sfn.role_arn
-#       role_name                  = sfn.role_name
-#       log_group_name             = sfn.log_group_name
-#     }
-#   }
-# }
+output "step_functions" {
+  description = "Step Function state machine information (map)"
+  value = {
+    for name, sfn in module.step_function : name => {
+      state_machine_name         = sfn.state_machine_name
+      state_machine_arn          = sfn.state_machine_arn
+      state_machine_id           = sfn.state_machine_id
+      state_machine_creation_date = sfn.state_machine_creation_date
+      state_machine_status       = sfn.state_machine_status
+      role_arn                   = sfn.role_arn
+      role_name                  = sfn.role_name
+      log_group_name             = sfn.log_group_name
+    }
+  }
+}
 
-# EventBridge Rule outputs
-# output "eventbridge_rules" {
-#   description = "EventBridge Scheduler information"
+
+
+# Monthly Adding Site Tables Producer outputs
+# output "monthly_adding_site_tables_producers" {
+#   description = "Monthly adding site tables producer info (Lambda + Scheduler)"
 #   value = {
-#     for k, v in module.eventbridge_rule : k => {
-#       scheduler_arn = v.scheduler_arn
-#       scheduler_id  = v.scheduler_id
+#     for k, v in module.monthly_adding_site_tables_producer : k => {
+#       lambda_function_name = v.lambda_function_name
+#       lambda_function_arn  = v.lambda_function_arn
+#       schedule_arn         = v.schedule_arn
+#       schedule_id          = v.schedule_id
 #     }
 #   }
 # }

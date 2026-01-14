@@ -12,6 +12,11 @@ variable "name" {
 variable "definition" {
   description = "Amazon States Language definition of the state machine"
   type        = string
+
+  validation {
+    condition     = try(jsondecode(var.definition), null) != null
+    error_message = "The Step Functions state machine definition must be valid JSON."
+  }
 }
 
 # State machine configuration
@@ -26,13 +31,6 @@ variable "state_machine_type" {
   }
 }
 
-# Custom IAM policy
-variable "custom_policy_json" {
-  description = "Custom IAM policy JSON for additional permissions"
-  type        = string
-  default     = null
-}
-
 # Logging configuration
 variable "enable_logging" {
   description = "Whether to enable CloudWatch logging"
@@ -43,18 +41,12 @@ variable "enable_logging" {
 variable "log_level" {
   description = "Log level (ALL, ERROR, FATAL, OFF)"
   type        = string
-  default     = "ERROR"
+  default     = "OFF"
 
   validation {
     condition     = contains(["ALL", "ERROR", "FATAL", "OFF"], var.log_level)
     error_message = "Log level must be ALL, ERROR, FATAL, or OFF."
   }
-}
-
-variable "log_include_execution_data" {
-  description = "Whether to include execution data in logs"
-  type        = bool
-  default     = false
 }
 
 variable "log_retention_in_days" {
@@ -72,12 +64,6 @@ variable "tags" {
 
 variable "execution_role_arn" {
   description = "ARN of the IAM role for Step Function execution. If set, module will use this role."
-  type        = string
-  default     = null
-}
-
-variable "logging_role_arn" {
-  description = "ARN of the IAM role for Step Function logging. If set, module will use this role."
   type        = string
   default     = null
 }
