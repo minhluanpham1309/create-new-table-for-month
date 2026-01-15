@@ -15,8 +15,8 @@ env:
   PYTHON_VERSION: '3.11'
   AWS_ACCOUNT_ID: 683918607581
   GITHUB_OIDC_ROLE: HeatmapJapan-GithubAction
-  LAMBDA_FUNCTION_NAME: MonthlyAddingSiteTablesConsumer
-  LAMBDA_DIR: MonthlyAddingSiteTablesConsumer
+  LAMBDA_FUNCTION_NAME: MonthyAddingSiteTablesConsumer
+  LAMBDA_DIR: MonthyAddingSiteTablesConsumer
 
 jobs:
   deploy:
