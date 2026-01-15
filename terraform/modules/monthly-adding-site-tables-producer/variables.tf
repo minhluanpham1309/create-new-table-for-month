@@ -44,18 +44,6 @@ variable "lambda_architectures" {
   default     = ["x86_64"]
 }
 
-variable "lambda_filename" {
-  description = "Optional lambda zip path"
-  type        = string
-  default     = null
-}
-
-variable "lambda_source_code_hash" {
-  description = "Optional lambda source code hash"
-  type        = string
-  default     = null
-}
-
 variable "lambda_environment_variables" {
   description = "Additional env vars for lambda (ENVIRONMENT is added automatically)"
   type        = map(string)

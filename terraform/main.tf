@@ -55,8 +55,6 @@ module "monthly_adding_site_tables_producer" {
   lambda_timeout               = var.monthly_adding_site_tables_producers.lambda_timeout
   lambda_memory_size           = var.monthly_adding_site_tables_producers.lambda_memory_size
   lambda_architectures         = var.monthly_adding_site_tables_producers.lambda_architectures
-  lambda_filename              = var.monthly_adding_site_tables_producers.lambda_filename
-  lambda_source_code_hash      = var.monthly_adding_site_tables_producers.lambda_source_code_hash
   lambda_environment_variables = var.monthly_adding_site_tables_producers.lambda_environment_variables
   lambda_log_retention_in_days = var.monthly_adding_site_tables_producers.lambda_log_retention_in_days
 

@@ -59,9 +59,6 @@ module "lambda" {
   memory_size   = var.lambda_memory_size
   architectures = var.lambda_architectures
 
-  filename         = var.lambda_filename
-  source_code_hash = var.lambda_source_code_hash
-
   environment_variables = var.lambda_environment_variables
 
   role_arn = local.lambda_role_arn

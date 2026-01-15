@@ -48,8 +48,6 @@ variable "monthly_adding_site_tables_producers" {
     lambda_timeout               = optional(number, 900)
     lambda_memory_size           = optional(number, 256)
     lambda_architectures         = optional(list(string), ["x86_64"])
-    lambda_filename              = optional(string, null)
-    lambda_source_code_hash      = optional(string, null)
     lambda_environment_variables = optional(map(string), {})
     lambda_log_retention_in_days = optional(number, 7)
 
