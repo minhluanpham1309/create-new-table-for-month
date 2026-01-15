@@ -22,8 +22,8 @@ variable "runtime" {
 # Deployment package configuration (one of these must be provided)
 variable "filename" {
   description = "Path to the function's deployment package within the local filesystem"
-  type    = string
-  default = null
+  type        = string
+  default     = null
 }
 
 variable "source_code_hash" {

@@ -8,12 +8,12 @@ output "lambda_function_arn" {
   value       = module.lambda.function_arn
 }
 
-output "schedule_arn" {
-  description = "EventBridge Scheduler schedule ARN"
-  value       = module.schedule.scheduler_arn
+output "lambda_role_arn" {
+  description = "Lambda execution role ARN (created or provided)"
+  value       = local.lambda_role_arn
 }
 
-output "schedule_id" {
-  description = "EventBridge Scheduler schedule ID"
-  value       = module.schedule.scheduler_id
+output "scheduler_role_arn" {
+  description = "EventBridge Scheduler role ARN (created or provided)"
+  value       = local.scheduler_role_arn
 }
