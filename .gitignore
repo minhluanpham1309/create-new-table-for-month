@@ -61,9 +61,18 @@ logs/
 # Testing
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 .tox/
 .hypothesis/
+*.cover
+.cache
+nosetests.xml
+test-results/
+*.test
+bandit-report.json
+security-report.json
+MonthlyAddingSiteTablesConsumer/build/
 
 # Jupyter Notebook
 .ipynb_checkpoints

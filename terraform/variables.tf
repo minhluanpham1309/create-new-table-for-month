@@ -52,16 +52,16 @@ variable "monthly_adding_site_tables_producers" {
     lambda_log_retention_in_days = optional(number, 7)
 
     # Lambda IAM Role (Auto-create if null)
-    lambda_role_arn           = optional(string, null)
-    lambda_inline_policies    = optional(map(string), {})
+    lambda_inline_policies     = optional(map(string), {})
 
-    # Optional VPC
+    # VPC Configuration
     vpc_config = optional(object({
       vpc_id             = string
       subnet_ids         = list(string)
       security_group_ids = list(string)
     }))
     create_security_group = optional(bool, false)
+    rds_security_group_id = optional(string, null)
 
     # EventBridge Scheduler
     schedule_name                = string
@@ -72,8 +72,12 @@ variable "monthly_adding_site_tables_producers" {
     schedule_input               = optional(any, {})
 
     # Scheduler IAM Role (Auto-create if null)
-    scheduler_role_arn           = optional(string, null)
     scheduler_inline_policies    = optional(map(string), {})
+
+    schedule_retry_policy        = object({
+      maximum_event_age_in_seconds = number
+      maximum_retry_attempts       = number
+    })
 
     # Tags
     tags = optional(map(string), {})

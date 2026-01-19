@@ -36,25 +36,21 @@ variable "source_code_hash" {
 variable "timeout" {
   description = "Function timeout in seconds"
   type        = number
-  default     = 30
 }
 
 variable "memory_size" {
   description = "Amount of memory in MB your Lambda Function can use at runtime"
   type        = number
-  default     = 256
 }
 
 variable "architectures" {
   description = "Instruction set architecture for your Lambda function"
   type        = list(string)
-  default     = ["x86_64"]
 }
 
 variable "environment_variables" {
   description = "Map of environment variables for the Lambda function"
   type        = map(string)
-  default     = null
 }
 
 # VPC configuration
@@ -65,30 +61,30 @@ variable "vpc_config" {
     subnet_ids         = list(string)
     security_group_ids = list(string)
   })
-  default = null
 }
 
 variable "create_security_group" {
   description = "Whether to create a security group for Lambda function"
   type        = bool
-  default     = false
 }
 
 variable "log_retention_in_days" {
   description = "CloudWatch log retention in days"
   type        = number
-  default     = 7
 }
 
 variable "tags" {
   description = "Additional tags to apply to all resources in this module"
   type        = map(string)
-  default     = {}
 }
 
 variable "role_arn" {
   description = "IAM role ARN to use for Lambda function. If not set, a new role will be created.\n\nNếu truyền role_arn, role này phải có trust policy như sau:\n{\n  \"Effect\": \"Allow\",\n  \"Principal\": { \"Service\": \"lambda.amazonaws.com\" },\n  \"Action\": \"sts:AssumeRole\"\n}\nVà phải được attach policy AWSLambdaBasicExecutionRole."
   type        = string
-  default     = null
+}
+
+variable "rds_security_group_id" {
+    description = "RDS Security Group ID to allow Lambda access to RDS instance (if applicable)"
+    type        = string
 }
 

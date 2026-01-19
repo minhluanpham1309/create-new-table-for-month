@@ -58,13 +58,12 @@ module "monthly_adding_site_tables_producer" {
   lambda_environment_variables = var.monthly_adding_site_tables_producers.lambda_environment_variables
   lambda_log_retention_in_days = var.monthly_adding_site_tables_producers.lambda_log_retention_in_days
 
-  # Lambda IAM (Auto-create if null)
-  lambda_role_arn            = var.monthly_adding_site_tables_producers.lambda_role_arn
   lambda_inline_policies     = var.monthly_adding_site_tables_producers.lambda_inline_policies
 
   # VPC
   vpc_config            = try(var.monthly_adding_site_tables_producers.vpc_config, null)
   create_security_group = var.monthly_adding_site_tables_producers.create_security_group
+  rds_security_group_id = var.monthly_adding_site_tables_producers.rds_security_group_id
 
   # EventBridge Scheduler
   schedule_name                = var.monthly_adding_site_tables_producers.schedule_name
@@ -74,9 +73,8 @@ module "monthly_adding_site_tables_producer" {
   schedule_enabled             = var.monthly_adding_site_tables_producers.schedule_enabled
   schedule_input               = var.monthly_adding_site_tables_producers.schedule_input
 
-  # Scheduler IAM (Auto-create if null)
-  scheduler_role_arn            = var.monthly_adding_site_tables_producers.scheduler_role_arn
   scheduler_inline_policies     = var.monthly_adding_site_tables_producers.scheduler_inline_policies
+  schedule_retry_policy         = var.monthly_adding_site_tables_producers.schedule_retry_policy
 
   tags = merge(var.tags, try(var.monthly_adding_site_tables_producers.tags, {}))
 }

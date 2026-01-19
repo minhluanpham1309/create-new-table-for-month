@@ -13,11 +13,6 @@ module "heatmap_japan_dev" {
   monthly_adding_site_tables_producers = {
     # Lambda function configuration
     lambda_function_name = var.lambda_function_name
-    lambda_handler       = "lambda_function.lambda_handler"
-    lambda_runtime       = "python3.11"
-
-    lambda_timeout     = 900
-    lambda_memory_size = 256
 
     lambda_environment_variables = {
       SITE_CHUNK_DAYS = 21
@@ -25,19 +20,15 @@ module "heatmap_japan_dev" {
     }
 
     lambda_inline_policies = {
-      "rds-secrets" = jsonencode({
-        Version = "2012-10-17"
-        Statement = [{
-          Sid      = "ReadRDSSecrets"
-          Effect   = "Allow"
-          Action   = ["secretsmanager:GetSecretValue"]
-          Resource = "arn:aws:secretsmanager:ap-northeast-1:683918607581:secret:rds/db-test-private*"
-        }]
-      })
-      cloudwatch-logs-access = jsonencode({
+      "${var.lambda_function_name}-lambda-role" = jsonencode({
         Version = "2012-10-17"
         Statement = [
           {
+            Sid      = "ReadRDSSecrets"
+            Effect   = "Allow"
+            Action   = ["secretsmanager:GetSecretValue"]
+            Resource = "arn:aws:secretsmanager:ap-northeast-1:683918607581:secret:rds/db-test-private*"
+          },{
             Sid    = "CloudWatchLogsAccess"
             Effect = "Allow"
             Action = [
@@ -45,40 +36,42 @@ module "heatmap_japan_dev" {
               "logs:CreateLogStream",
               "logs:PutLogEvents"
             ]
-            Resource = "*"
+            Resource = [
+              "arn:aws:logs:ap-northeast-1:683918607581:*"
+            ]
           }
         ]
       })
     }
 
     # VPC config
-    create_security_group = false
+    create_security_group = true
     vpc_config = {
       vpc_id             = "vpc-08586cd9f6ce3a905"
       subnet_ids         = ["subnet-0ffa21d23c30bbf14", "subnet-09e78cbbf83798d9a", "subnet-0071f6115ba604b19"]
-      security_group_ids = ["sg-0ed6967b20d09fea2"]
+      security_group_ids = []
     }
+
+    # RDS Security Group
+    rds_security_group_id = "sg-0ec24edb38ce58304"
 
     # Scheduler configuration
     schedule_name                = "monthly-adding-site-tables-producer-schedule"
-    schedule_description         = "Trigger monthly-adding-site-tables-producer on a schedule"
-    schedule_expression          = "cron(20 0 1 * ? *)"
-    schedule_expression_timezone = "Asia/Tokyo"
-    schedule_enabled             = true
-
     scheduler_inline_policies = {
-        "invoke-lambda" = jsonencode({
-            Version = "2012-10-17"
-            Statement = [{
-              Sid      = "InvokeLambdaFunction"
-              Effect   = "Allow"
-              Action   = ["lambda:InvokeFunction"]
-              Resource = ["arn:aws:lambda:ap-northeast-1:683918607581:function:${var.lambda_function_name}"]
-            }]
-        })
+      "invoke-lambda" = jsonencode({
+        Version = "2012-10-17"
+        Statement = [{
+          Sid      = "InvokeLambdaFunction"
+          Effect   = "Allow"
+          Action   = ["lambda:InvokeFunction"]
+          Resource = ["arn:aws:lambda:ap-northeast-1:683918607581:function:${var.lambda_function_name}*"]
+        }]
+      })
     }
 
-    # Optional payload
-    schedule_input = {}
+    schedule_retry_policy = {
+      maximum_event_age_in_seconds = 900
+      maximum_retry_attempts       = 3
+    }
   }
 }

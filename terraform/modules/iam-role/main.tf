@@ -1,10 +1,6 @@
 resource "aws_iam_role" "this" {
   name                  = var.role_name
   assume_role_policy    = var.assume_role_policy
-  description           = var.description
-  max_session_duration  = var.max_session_duration
-  force_detach_policies = var.force_detach_policies
-  path                  = var.path
 
   tags = merge(
     var.tags,

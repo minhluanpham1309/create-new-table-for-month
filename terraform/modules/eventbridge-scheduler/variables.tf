@@ -73,3 +73,14 @@ variable "target" {
 
   default = null
 }
+
+# ============================================================================
+# RETRY CONFIGURATION
+# ============================================================================
+variable "retry_policy" {
+  description = "Retry policy configuration for the schedule target"
+  type = object({
+    maximum_retry_attempts       = number
+    maximum_event_age_in_seconds = number
+  })
+}
