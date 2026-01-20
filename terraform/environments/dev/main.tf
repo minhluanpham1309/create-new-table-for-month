@@ -1,5 +1,8 @@
-variable "lambda_function_name" {
+variable "lambda_function_name_producer" {
   default = "MonthlyAddingSiteTablesProducer"
+}
+variable "lambda_function_name_consumer" {
+  default = "MonthlyAddingSiteTablesConsumer"
 }
 module "heatmap_japan_dev" {
   source = "../../"
