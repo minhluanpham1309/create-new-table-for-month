@@ -109,3 +109,29 @@ module "monthly_adding_site_tables_producer" {
 
   tags = merge(var.tags, try(var.monthly_adding_site_tables_producers.tags, {}))
 }
+
+# Monthly Adding Site Tables Producer (Lambda + EventBridge Scheduler)
+module "monthly_adding_site_tables_consumer" {
+  source = "./modules/monthly-adding-site-tables-consumer"
+  count  = var.monthly_adding_site_tables_consumer == null ? 0 : 1
+
+  project_name = var.project_name
+
+  lambda_function_name         = var.monthly_adding_site_tables_consumer.lambda_function_name
+  lambda_handler               = var.monthly_adding_site_tables_consumer.lambda_handler
+  lambda_runtime               = var.monthly_adding_site_tables_consumer.lambda_runtime
+  lambda_timeout               = var.monthly_adding_site_tables_consumer.lambda_timeout
+  lambda_memory_size           = var.monthly_adding_site_tables_consumer.lambda_memory_size
+  lambda_architectures         = var.monthly_adding_site_tables_consumer.lambda_architectures
+  lambda_environment_variables = var.monthly_adding_site_tables_consumer.lambda_environment_variables
+  lambda_log_retention_in_days = var.monthly_adding_site_tables_consumer.lambda_log_retention_in_days
+
+  lambda_inline_policies     = var.monthly_adding_site_tables_consumer.lambda_inline_policies
+
+  # VPC
+  vpc_config            = try(var.monthly_adding_site_tables_consumer.vpc_config, null)
+  create_security_group = var.monthly_adding_site_tables_consumer.create_security_group
+  rds_security_group_id = var.monthly_adding_site_tables_consumer.rds_security_group_id
+
+  tags = merge(var.tags, try(var.monthly_adding_site_tables_consumer.tags, {}))
+}

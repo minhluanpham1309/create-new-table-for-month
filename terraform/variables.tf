@@ -169,3 +169,37 @@ variable "monthly_adding_site_tables_producers" {
   nullable = true
   default  = null
 }
+
+# Monthly Adding Site Tables Producer (Lambda)
+variable "monthly_adding_site_tables_consumer" {
+  description = "Configuration for monthly-adding-site-tables-consumer"
+  type = object({
+    # Lambda
+    lambda_function_name         = string
+    lambda_handler               = optional(string, "lambda_function.lambda_handler")
+    lambda_runtime               = optional(string, "python3.11")
+    lambda_timeout               = optional(number, 900)
+    lambda_memory_size           = optional(number, 256)
+    lambda_architectures         = optional(list(string), ["x86_64"])
+    lambda_environment_variables = optional(map(string), {})
+    lambda_log_retention_in_days = optional(number, 7)
+
+    # Lambda IAM Role (Auto-create if null)
+    lambda_inline_policies     = optional(map(string), {})
+
+    # VPC Configuration
+    vpc_config = optional(object({
+      vpc_id             = string
+      subnet_ids         = list(string)
+      security_group_ids = list(string)
+    }))
+    create_security_group = optional(bool, false)
+    rds_security_group_id = optional(string, null)
+
+    # Tags
+    tags = optional(map(string), {})
+  })
+
+  nullable = true
+  default  = null
+}

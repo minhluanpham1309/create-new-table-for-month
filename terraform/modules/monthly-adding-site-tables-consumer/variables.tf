@@ -1,0 +1,74 @@
+variable "project_name" {
+  description = "Project name used as prefix for resources"
+  type        = string
+}
+
+variable "tags" {
+  description = "Additional tags"
+  type        = map(string)
+}
+
+variable "lambda_function_name" {
+  description = "Lambda function name"
+  type        = string
+}
+
+variable "lambda_handler" {
+  description = "Lambda handler"
+  type        = string
+}
+
+variable "lambda_runtime" {
+  description = "Lambda runtime"
+  type        = string
+}
+
+variable "lambda_timeout" {
+  description = "Lambda timeout (seconds)"
+  type        = number
+}
+
+variable "lambda_memory_size" {
+  description = "Lambda memory size (MB)"
+  type        = number
+}
+
+variable "lambda_architectures" {
+  description = "Lambda architectures"
+  type        = list(string)
+}
+
+variable "lambda_environment_variables" {
+  description = "Additional env vars for lambda (ENVIRONMENT is added automatically)"
+  type        = map(string)
+}
+
+variable "lambda_inline_policies" {
+  description = "Map of inline policy names to policy documents (JSON string) for Lambda role. Only used when lambda_role_arn is null"
+  type        = map(string)
+}
+
+variable "lambda_log_retention_in_days" {
+  description = "CloudWatch log retention for lambda"
+  type        = number
+}
+
+variable "vpc_config" {
+  description = "VPC config for lambda"
+  type = object({
+    vpc_id             = string
+    subnet_ids         = list(string)
+    security_group_ids = list(string)
+  })
+}
+
+variable "create_security_group" {
+  description = "Whether to create a security group for lambda when vpc_config is set"
+  type        = bool
+  default     = false
+}
+
+variable "rds_security_group_id" {
+  description = "RDS Security Group ID to allow Lambda access. If provided, will create ingress rule."
+  type        = string
+}
