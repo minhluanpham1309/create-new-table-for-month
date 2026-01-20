@@ -9,6 +9,23 @@ module "heatmap_japan_dev" {
   environment  = "dev"
   project_name = "heatmap-japan"
 
+  # Network configuration - existing VPC
+  vpc_id                    = "vpc-08586cd9f6ce3a905"
+  subnet_ids                = ["subnet-0ffa21d23c30bbf14", "subnet-09e78cbbf83798d9a", "subnet-0071f6115ba604b19"]
+  allowed_security_group_ids = ["sg-01bac204cde449aee","sg-06addf3041186f839","sg-03b92aa686c2d348d"]
+  # Valkey configuration for dev - single node for cost savings
+  valkey_node_type                       = "cache.t4g.micro"   # Smallest ARM-based instance
+  valkey_num_cache_nodes                 = 1                   # Single node to save cost
+  valkey_engine_version                  = "8.1"               # Latest Valkey version
+  valkey_multi_az_enabled                = false               # Single AZ for dev
+  valkey_at_rest_encryption_enabled      = false               # Disable encryption for simplicity
+  valkey_transit_encryption_enabled      = false               # Disable encryption for simplicity
+  valkey_snapshot_retention_limit        = 1                   # Minimal backup retention
+  valkey_snapshot_window                 = "03:00-04:00"
+  valkey_maintenance_window              = "sun:04:00-sun:05:00"
+  valkey_enable_cloudwatch_alarms        = true               # No alarms for dev
+  valkey_alarm_actions = ["arn:aws:sns:ap-northeast-1:683918607581:alert-valkey"]
+
   # Lambda functions configuration (if needed)
   monthly_adding_site_tables_producers = {
     # Lambda function configuration

@@ -15,10 +15,93 @@ variable "project_name" {
   default     = "heatmap-japan"
 }
 
+variable "vpc_id" {
+  description = "Existing VPC ID"
+  type        = string
+}
+
+variable "subnet_ids" {
+  description = "Existing subnet IDs for Valkey"
+  type        = list(string)
+}
+
+variable "allowed_security_group_ids" {
+  description = "Security group IDs of EC2 instances allowed to access Valkey"
+  type        = list(string)
+  default     = []
+}
+
 variable "tags" {
   description = "Additional tags"
   type        = map(string)
   default     = {}
+}
+
+# Valkey variables
+variable "valkey_node_type" {
+  description = "The instance class for Valkey nodes"
+  type        = string
+  default     = "cache.t3.micro"
+}
+
+variable "valkey_num_cache_nodes" {
+  description = "Number of cache nodes"
+  type        = number
+  default     = 2
+}
+
+variable "valkey_engine_version" {
+  description = "Valkey engine version"
+  type        = string
+  default     = "8.1"
+}
+
+variable "valkey_multi_az_enabled" {
+  description = "Specifies whether to enable Multi-AZ Support"
+  type        = bool
+  default     = true
+}
+
+variable "valkey_at_rest_encryption_enabled" {
+  description = "Whether to enable encryption at rest"
+  type        = bool
+  default     = true
+}
+
+variable "valkey_transit_encryption_enabled" {
+  description = "Whether to enable encryption in transit"
+  type        = bool
+  default     = true
+}
+
+variable "valkey_snapshot_retention_limit" {
+  description = "Number of days to retain snapshots"
+  type        = number
+  default     = 7
+}
+
+variable "valkey_snapshot_window" {
+  description = "Time window for snapshots"
+  type        = string
+  default     = "03:00-04:00"
+}
+
+variable "valkey_maintenance_window" {
+  description = "Maintenance window"
+  type        = string
+  default     = "sun:04:00-sun:05:00"
+}
+
+variable "valkey_alarm_actions" {
+    description = "List of SNS topic ARNs for CloudWatch alarms"
+    type        = list(string)
+    default     = []
+}
+
+variable "valkey_enable_cloudwatch_alarms" {
+  description = "Whether to create CloudWatch alarms"
+  type        = bool
+  default     = true
 }
 
 # Step Function variables (unified object map)

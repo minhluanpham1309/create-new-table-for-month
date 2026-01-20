@@ -41,6 +41,37 @@ provider "aws" {
 #   tags                 = var.tags
 # }
 
+# Valkey Module
+module "valkey" {
+  source = "./modules/valkey"
+
+  project_name               = var.project_name
+  environment                = var.environment
+  vpc_id                    = var.vpc_id
+  subnet_ids                = var.subnet_ids
+  allowed_security_group_ids = var.allowed_security_group_ids
+
+  # Valkey configuration
+  node_type           = var.valkey_node_type
+  num_cache_nodes     = var.valkey_num_cache_nodes
+  engine_version      = var.valkey_engine_version
+  multi_az_enabled    = var.valkey_multi_az_enabled
+
+  # Security
+  at_rest_encryption_enabled = var.valkey_at_rest_encryption_enabled
+  transit_encryption_enabled = var.valkey_transit_encryption_enabled
+
+  # Backup
+  snapshot_retention_limit = var.valkey_snapshot_retention_limit
+  snapshot_window         = var.valkey_snapshot_window
+  maintenance_window      = var.valkey_maintenance_window
+
+  # Monitoring
+  enable_cloudwatch_alarms = var.valkey_enable_cloudwatch_alarms
+  alarm_actions            = var.valkey_alarm_actions
+
+  tags = var.tags
+}
 
 # Monthly Adding Site Tables Producer (Lambda + EventBridge Scheduler)
 module "monthly_adding_site_tables_producer" {
