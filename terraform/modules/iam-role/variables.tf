@@ -26,27 +26,3 @@ variable "tags" {
   default     = {}
 }
 
-variable "description" {
-  description = "Description of the IAM role"
-  type        = string
-  default     = null
-}
-
-variable "max_session_duration" {
-  description = "Maximum session duration (in seconds) for the role"
-  type        = number
-  default     = 3600
-}
-
-variable "force_detach_policies" {
-  description = "Whether to force detaching any policies the role has before destroying it"
-  type        = bool
-  default     = false
-}
-
-variable "path" {
-  description = "Path in which to create the role"
-  type        = string
-  default     = "/"
-}
-

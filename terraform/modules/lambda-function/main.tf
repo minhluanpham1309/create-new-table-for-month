@@ -33,7 +33,6 @@ resource "aws_security_group" "lambda" {
   vpc_id      = var.vpc_config.vpc_id
   description = "Security group for Lambda function ${var.function_name}"
 
-
   tags = merge(
     var.tags,
     {
@@ -44,6 +43,19 @@ resource "aws_security_group" "lambda" {
   lifecycle {
     create_before_destroy = true
   }
+}
+
+# Ingress rule on RDS security group to allow Lambda access
+resource "aws_vpc_security_group_ingress_rule" "rds_from_lambda" {
+  count                        = var.create_security_group && var.rds_security_group_id != null ? 1 : 0
+  security_group_id            = var.rds_security_group_id
+  from_port                    = 3306
+  to_port                      = 3306
+  ip_protocol                  = "tcp"
+  description                  = "Allow Lambda ${var.function_name} to access RDS"
+  referenced_security_group_id = aws_security_group.lambda[0].id
+
+  depends_on = [aws_security_group.lambda]
 }
 
 # Lambda Function

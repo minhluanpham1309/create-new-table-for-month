@@ -13,8 +13,3 @@ output "role_id" {
   value       = aws_iam_role.this.id
 }
 
-output "role_unique_id" {
-  description = "Unique ID of the IAM role"
-  value       = aws_iam_role.this.unique_id
-}
-
