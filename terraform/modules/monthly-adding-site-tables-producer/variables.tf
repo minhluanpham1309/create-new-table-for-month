@@ -109,9 +109,14 @@ variable "rds_security_group_id" {
 }
 
 variable "schedule_retry_policy" {
-    description = "Retry policy for EventBridge Scheduler"
-    type = object({
-        maximum_event_age_in_seconds = number
-        maximum_retry_attempts       = number
-    })
+  description = "Retry policy for EventBridge Scheduler"
+  type = object({
+    maximum_event_age_in_seconds = number
+    maximum_retry_attempts       = number
+  })
+}
+
+variable "smg_end_point_sg_id" {
+  description = "Secret manager end point to allow Lambda access. If provided, will create ingress rule."
+  type        = string
 }

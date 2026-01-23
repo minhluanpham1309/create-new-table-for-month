@@ -93,9 +93,9 @@ variable "valkey_maintenance_window" {
 }
 
 variable "valkey_alarm_actions" {
-    description = "List of SNS topic ARNs for CloudWatch alarms"
-    type        = list(string)
-    default     = []
+  description = "List of SNS topic ARNs for CloudWatch alarms"
+  type        = list(string)
+  default     = []
 }
 
 variable "valkey_enable_cloudwatch_alarms" {
@@ -135,7 +135,7 @@ variable "monthly_adding_site_tables_producers" {
     lambda_log_retention_in_days = optional(number, 7)
 
     # Lambda IAM Role (Auto-create if null)
-    lambda_inline_policies     = optional(map(string), {})
+    lambda_inline_policies = optional(map(string), {})
 
     # VPC Configuration
     vpc_config = optional(object({
@@ -145,6 +145,7 @@ variable "monthly_adding_site_tables_producers" {
     }))
     create_security_group = optional(bool, false)
     rds_security_group_id = optional(string, null)
+    smg_end_point_sg_id   = optional(string, null)
 
     # EventBridge Scheduler
     schedule_name                = string
@@ -155,9 +156,9 @@ variable "monthly_adding_site_tables_producers" {
     schedule_input               = optional(any, {})
 
     # Scheduler IAM Role (Auto-create if null)
-    scheduler_inline_policies    = optional(map(string), {})
+    scheduler_inline_policies = optional(map(string), {})
 
-    schedule_retry_policy        = object({
+    schedule_retry_policy = object({
       maximum_event_age_in_seconds = number
       maximum_retry_attempts       = number
     })
@@ -185,7 +186,7 @@ variable "monthly_adding_site_tables_consumer" {
     lambda_log_retention_in_days = optional(number, 7)
 
     # Lambda IAM Role (Auto-create if null)
-    lambda_inline_policies     = optional(map(string), {})
+    lambda_inline_policies = optional(map(string), {})
 
     # VPC Configuration
     vpc_config = optional(object({
@@ -195,6 +196,25 @@ variable "monthly_adding_site_tables_consumer" {
     }))
     create_security_group = optional(bool, false)
     rds_security_group_id = optional(string, null)
+    smg_end_point_sg_id   = optional(string, null)
+
+    # Step Function Configuration
+    step_function_name            = optional(string, "")
+    step_function_inline_policies = optional(map(string), {})
+
+    # SNS Configuration
+    sns_topic_name          = string
+    sns_display_name        = string
+    sns_subscription_emails = list(string)
+
+    # Scheduler
+    schedule_name                = string
+    schedule_description         = optional(string, "Trigger monthly-adding-site-tables-consumer on a schedule")
+    schedule_expression          = string
+    schedule_expression_timezone = optional(string, "Asia/Tokyo")
+    schedule_enabled             = optional(bool, true)
+    schedule_input               = optional(any, {})
+    scheduler_inline_policies    = optional(map(string), {})
 
     # Tags
     tags = optional(map(string), {})

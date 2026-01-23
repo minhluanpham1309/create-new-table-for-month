@@ -58,6 +58,18 @@ resource "aws_vpc_security_group_ingress_rule" "rds_from_lambda" {
   depends_on = [aws_security_group.lambda]
 }
 
+resource "aws_vpc_security_group_ingress_rule" "smg_from_lambda" {
+  count                        = var.create_security_group && var.smg_end_point_sg_id != null ? 1 : 0
+  security_group_id            = var.smg_end_point_sg_id
+  from_port                    = 443
+  to_port                      = 443
+  ip_protocol                  = "tcp"
+  description                  = "Allow Lambda ${var.function_name} to access Secrets Manager"
+  referenced_security_group_id = aws_security_group.lambda[0].id
+
+  depends_on = [aws_security_group.lambda]
+}
+
 # Lambda Function
 resource "aws_lambda_function" "this" {
   function_name = var.function_name

@@ -1,10 +1,4 @@
-# Required variables
-variable "project_name" {
-  description = "Project name"
-  type        = string
-}
-
-variable "name" {
+variable "state_name" {
   description = "Name of the Step Functions state machine"
   type        = string
 }
@@ -31,30 +25,6 @@ variable "state_machine_type" {
   }
 }
 
-# Logging configuration
-variable "enable_logging" {
-  description = "Whether to enable CloudWatch logging"
-  type        = bool
-  default     = true
-}
-
-variable "log_level" {
-  description = "Log level (ALL, ERROR, FATAL, OFF)"
-  type        = string
-  default     = "OFF"
-
-  validation {
-    condition     = contains(["ALL", "ERROR", "FATAL", "OFF"], var.log_level)
-    error_message = "Log level must be ALL, ERROR, FATAL, or OFF."
-  }
-}
-
-variable "log_retention_in_days" {
-  description = "CloudWatch log retention in days"
-  type        = number
-  default     = 7
-}
-
 # Tags
 variable "tags" {
   description = "Additional tags"
@@ -62,14 +32,8 @@ variable "tags" {
   default     = {}
 }
 
-variable "execution_role_arn" {
+variable "role_arn" {
   description = "ARN of the IAM role for Step Function execution. If set, module will use this role."
-  type        = string
-  default     = null
-}
-
-variable "sns_topic_arn" {
-  description = "ARN of the SNS topic to notify. If set, module will use this topic."
   type        = string
   default     = null
 }
