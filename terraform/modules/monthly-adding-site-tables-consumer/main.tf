@@ -14,20 +14,6 @@ module "lambda_role" {
   tags = var.tags
 }
 
-# Scheduler Role
-module "scheduler_role" {
-  source = "../iam-role"
-
-  role_name = "${var.lambda_function_name}-scheduler"
-  assume_role_policy = jsonencode({
-    Version   = "2012-10-17"
-    Statement = [{ Effect = "Allow", Principal = { Service = "scheduler.amazonaws.com" }, Action = "sts:AssumeRole" }]
-  })
-
-  inline_policies = var.scheduler_inline_policies
-  tags            = var.tags
-}
-
 # Lambda Function
 module "lambda" {
   source = "../lambda-function"
@@ -55,6 +41,71 @@ module "lambda" {
   tags                  = var.tags
 }
 
+# Step Functions IAM Role
+module "step_function_role" {
+  source = "../iam-role"
+
+  role_name = "${var.step_function_name}-step-function"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "states.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  inline_policies = var.step_function_inline_policies
+
+  tags       = var.tags
+  depends_on = [module.lambda]
+}
+
+# Step Functions State Machine
+module "step_function" {
+  source = "../step-functions"
+
+  state_name = var.step_function_name
+  role_arn   = module.step_function_role.role_arn
+  definition = jsonencode({
+    "Comment" : "Minimal state machine",
+    "StartAt" : "Pass",
+    "States" : {
+      "Pass" : {
+        "Type" : "Pass",
+        "End" : true
+      }
+    }
+  })
+
+  tags = var.tags
+}
+
+# SNS Topic
+module "sns_topic" {
+  source = "../sns"
+
+  topic_name          = var.sns_topic_name
+  display_name        = var.sns_display_name
+  subscription_emails = var.sns_subscription_emails
+
+  tags = var.tags
+}
+
+# Scheduler Role
+module "scheduler_role" {
+  source = "../iam-role"
+
+  role_name = "${var.step_function_name}-scheduler"
+  assume_role_policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Principal = { Service = "scheduler.amazonaws.com" }, Action = "sts:AssumeRole" }]
+  })
+
+  inline_policies = var.scheduler_inline_policies
+  tags            = var.tags
+}
+
 module "schedule" {
   source = "../eventbridge-scheduler"
 
@@ -68,10 +119,8 @@ module "schedule" {
   scheduler_role_arn           = module.scheduler_role.role_arn
 
   target = {
-    type  = "lambda"
-    arn   = module.lambda.function_arn
+    type  = "step_function"
+    arn   = module.step_function.state_machine_arn
     input = var.schedule_input
   }
-  retry_policy = var.schedule_retry_policy
 }
-

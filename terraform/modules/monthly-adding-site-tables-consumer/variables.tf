@@ -68,6 +68,43 @@ variable "create_security_group" {
   default     = false
 }
 
+variable "rds_security_group_id" {
+  description = "RDS Security Group ID to allow Lambda access. If provided, will create ingress rule."
+  type        = string
+}
+
+variable "smg_end_point_sg_id" {
+  description = "Secret manager end point to allow Lambda access. If provided, will create ingress rule."
+  type        = string
+}
+
+# Step Functions variables
+variable "step_function_name" {
+  description = "Name of the Step Functions state machine"
+  type        = string
+}
+
+variable "step_function_inline_policies" {
+  description = "Map of inline policy names to policy documents (JSON string) for Step Function role"
+  type        = map(string)
+}
+
+# SNS variables
+variable "sns_topic_name" {
+  description = "Name of the SNS topic to create"
+  type        = string
+}
+
+variable "sns_display_name" {
+  description = "Display name for the SNS topic"
+  type        = string
+}
+
+variable "sns_subscription_emails" {
+  description = "List of email addresses to subscribe to the SNS topic"
+  type        = list(string)
+}
+
 variable "schedule_name" {
   description = "Logical schedule name (will be prefixed by project_name unless rule_name is provided)"
   type        = string
@@ -103,20 +140,11 @@ variable "scheduler_inline_policies" {
   type        = map(string)
 }
 
-variable "rds_security_group_id" {
-  description = "RDS Security Group ID to allow Lambda access. If provided, will create ingress rule."
-  type        = string
-}
-
 variable "schedule_retry_policy" {
   description = "Retry policy for EventBridge Scheduler"
   type = object({
     maximum_event_age_in_seconds = number
     maximum_retry_attempts       = number
   })
-}
-
-variable "smg_end_point_sg_id" {
-  description = "Secret manager end point to allow Lambda access. If provided, will create ingress rule."
-  type        = string
+  default = null
 }

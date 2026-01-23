@@ -107,7 +107,7 @@ variable "cpu_alarm_threshold" {
 variable "memory_alarm_threshold" {
   description = "Memory usage threshold for alarm (in bytes) "
   type        = number
-  default     = 104857600  # 100 MB
+  default     = 104857600 # 100 MB
 }
 
 variable "alarm_actions" {

@@ -83,4 +83,5 @@ variable "retry_policy" {
     maximum_retry_attempts       = number
     maximum_event_age_in_seconds = number
   })
+  default = null
 }

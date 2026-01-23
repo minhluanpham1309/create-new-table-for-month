@@ -79,12 +79,16 @@ variable "tags" {
 }
 
 variable "role_arn" {
-  description = "IAM role ARN to use for Lambda function. If not set, a new role will be created.\n\nNếu truyền role_arn, role này phải có trust policy như sau:\n{\n  \"Effect\": \"Allow\",\n  \"Principal\": { \"Service\": \"lambda.amazonaws.com\" },\n  \"Action\": \"sts:AssumeRole\"\n}\nVà phải được attach policy AWSLambdaBasicExecutionRole."
+  description = "IAM role ARN to use for Lambda function. If not set, a new role will be created."
   type        = string
 }
 
 variable "rds_security_group_id" {
-    description = "RDS Security Group ID to allow Lambda access to RDS instance (if applicable)"
-    type        = string
+  description = "RDS Security Group ID to allow Lambda access to RDS instance (if applicable)"
+  type        = string
 }
 
+variable "smg_end_point_sg_id" {
+  description = "Secret Manager Security Group ID to allow Lambda access to Secret Manager (if applicable)"
+  type        = string
+}
