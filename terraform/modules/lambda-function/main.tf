@@ -102,6 +102,8 @@ resource "aws_lambda_function" "this" {
   source_code_hash = coalesce(var.source_code_hash, data.archive_file.dummy.output_base64sha256)
 
   lifecycle {
+    ignore_changes = [filename, source_code_hash]
+    
     precondition {
       condition     = var.vpc_config == null || var.create_security_group || length(try(var.vpc_config.security_group_ids, [])) > 0
       error_message = "When vpc_config is specified, either create_security_group must be true or vpc_config.security_group_ids must contain at least one security group ID."

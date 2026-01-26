@@ -11,4 +11,8 @@ resource "aws_sfn_state_machine" "this" {
       Name = var.state_name
     }
   )
+
+  lifecycle {
+    ignore_changes = [definition]
+  }
 }
