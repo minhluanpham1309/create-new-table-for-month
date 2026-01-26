@@ -104,6 +104,12 @@ variable "valkey_enable_cloudwatch_alarms" {
   default     = true
 }
 
+variable "valkey_memory_alarm_threshold" {
+    description = "Memory usage alarm threshold in bytes"
+    type        = number
+    default     = 524288000 # 500 MB
+}
+
 # Step Function variables (unified object map)
 variable "step_functions" {
   description = "Map of Step Functions to create"

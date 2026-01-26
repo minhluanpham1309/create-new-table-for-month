@@ -34,6 +34,7 @@ module "heatmap_japan_dev" {
   valkey_maintenance_window         = "sun:04:00-sun:05:00"
   valkey_enable_cloudwatch_alarms   = true # No alarms for dev
   valkey_alarm_actions              = ["arn:aws:sns:ap-northeast-1:683918607581:alert-valkey"]
+  valkey_memory_alarm_threshold     = 104857600 # 100 MB
 
   # Lambda functions configuration (if needed)
   monthly_adding_site_tables_producers = {
@@ -162,7 +163,7 @@ module "heatmap_japan_dev" {
     schedule_name       = "monthly-adding-site-tables-consumer-schedule"
     schedule_expression = "cron(30 0 * * ? *)" # At 00:30 AM every day
     scheduler_inline_policies = {
-      "invoke-lambda" = jsonencode({
+      "execute_state_machine" = jsonencode({
         Version = "2012-10-17"
         Statement = [
           {

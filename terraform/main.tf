@@ -23,24 +23,6 @@ provider "aws" {
   }
 }
 
-# Step Function Module
-# module "step_function" {
-#   source   = "./modules/step-functions"
-#   for_each = var.step_functions
-#
-#   project_name         = var.project_name
-#   name                 = each.value.name
-#   definition           = each.value.definition
-#
-#   state_machine_type   = each.value.state_machine_type
-#   enable_logging       = each.value.enable_logging
-#   log_level            = each.value.log_level
-#   log_retention_in_days = each.value.log_retention_in_days
-#   execution_role_arn    = try(each.value.execution_role_arn, null)
-#
-#   tags                 = var.tags
-# }
-
 # Valkey Module
 module "valkey" {
   source = "./modules/valkey"
@@ -69,6 +51,7 @@ module "valkey" {
   # Monitoring
   enable_cloudwatch_alarms = var.valkey_enable_cloudwatch_alarms
   alarm_actions            = var.valkey_alarm_actions
+  memory_alarm_threshold   = var.valkey_memory_alarm_threshold
 
   tags = var.tags
 }
