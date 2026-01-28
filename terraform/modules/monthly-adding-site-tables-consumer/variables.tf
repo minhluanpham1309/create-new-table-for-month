@@ -43,9 +43,9 @@ variable "lambda_environment_variables" {
   type        = map(string)
 }
 
-variable "lambda_inline_policies" {
-  description = "Map of inline policy names to policy documents (JSON string) for Lambda role. Only used when lambda_role_arn is null"
-  type        = map(string)
+variable "lambda_role_arn" {
+  description = "IAM role ARN for Lambda function"
+  type        = string
 }
 
 variable "lambda_log_retention_in_days" {
@@ -84,9 +84,9 @@ variable "step_function_name" {
   type        = string
 }
 
-variable "step_function_inline_policies" {
-  description = "Map of inline policy names to policy documents (JSON string) for Step Function role"
-  type        = map(string)
+variable "step_function_role_arn" {
+  description = "IAM role ARN for Step Functions state machine"
+  type        = string
 }
 
 # SNS variables
@@ -135,16 +135,7 @@ variable "schedule_input" {
   type        = any
 }
 
-variable "scheduler_inline_policies" {
-  description = "Additional inline policies for Scheduler role (invoke-lambda is auto-added). Only used when scheduler_role_arn is null"
-  type        = map(string)
-}
-
-variable "schedule_retry_policy" {
-  description = "Retry policy for EventBridge Scheduler"
-  type = object({
-    maximum_event_age_in_seconds = number
-    maximum_retry_attempts       = number
-  })
-  default = null
+variable "scheduler_role_arn" {
+  description = "IAM role ARN for EventBridge Scheduler"
+  type        = string
 }

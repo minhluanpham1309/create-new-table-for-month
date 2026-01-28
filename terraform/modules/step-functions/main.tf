@@ -13,6 +13,6 @@ resource "aws_sfn_state_machine" "this" {
   )
 
   lifecycle {
-    ignore_changes = [definition]
+    ignore_changes = [definition] // Ignore changes to the definition to prevent unnecessary updates
   }
 }

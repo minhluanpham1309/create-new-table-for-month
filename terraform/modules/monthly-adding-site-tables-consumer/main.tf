@@ -1,19 +1,3 @@
-# Lambda Execution Role
-module "lambda_role" {
-  source = "../iam-role"
-
-  role_name = "${var.lambda_function_name}-lambda"
-  assume_role_policy = jsonencode({
-    Version   = "2012-10-17"
-    Statement = [{ Effect = "Allow", Principal = { Service = "lambda.amazonaws.com" }, Action = "sts:AssumeRole" }]
-  })
-
-  inline_policies     = var.lambda_inline_policies
-  managed_policy_arns = var.vpc_config != null ? ["arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"] : []
-
-  tags = var.tags
-}
-
 # Lambda Function
 module "lambda" {
   source = "../lambda-function"
@@ -30,7 +14,7 @@ module "lambda" {
 
   environment_variables = var.lambda_environment_variables
 
-  role_arn = module.lambda_role.role_arn
+  role_arn = var.lambda_role_arn
 
   create_security_group = var.create_security_group
   vpc_config            = var.vpc_config
@@ -41,32 +25,12 @@ module "lambda" {
   tags                  = var.tags
 }
 
-# Step Functions IAM Role
-module "step_function_role" {
-  source = "../iam-role"
-
-  role_name = "${var.step_function_name}-step-function"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "states.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-
-  inline_policies = var.step_function_inline_policies
-
-  tags       = var.tags
-  depends_on = [module.lambda]
-}
-
 # Step Functions State Machine
 module "step_function" {
   source = "../step-functions"
 
   state_name = var.step_function_name
-  role_arn   = module.step_function_role.role_arn
+  role_arn   = var.step_function_role_arn
   definition = jsonencode({
     "Comment" : "Minimal state machine",
     "StartAt" : "Pass",
@@ -92,20 +56,7 @@ module "sns_topic" {
   tags = var.tags
 }
 
-# Scheduler Role
-module "scheduler_role" {
-  source = "../iam-role"
-
-  role_name = "${var.step_function_name}-scheduler"
-  assume_role_policy = jsonencode({
-    Version   = "2012-10-17"
-    Statement = [{ Effect = "Allow", Principal = { Service = "scheduler.amazonaws.com" }, Action = "sts:AssumeRole" }]
-  })
-
-  inline_policies = var.scheduler_inline_policies
-  tags            = var.tags
-}
-
+# EventBridge Scheduler
 module "schedule" {
   source = "../eventbridge-scheduler"
 
@@ -116,7 +67,7 @@ module "schedule" {
   schedule_expression          = var.schedule_expression
   schedule_expression_timezone = var.schedule_expression_timezone
   enabled                      = var.schedule_enabled
-  scheduler_role_arn           = module.scheduler_role.role_arn
+  scheduler_role_arn           = var.scheduler_role_arn
 
   target = {
     type  = "step_function"

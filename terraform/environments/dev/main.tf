@@ -10,6 +10,90 @@ variable "sns_topic_monthly_adding_site_tables_notifications" {
 variable "sfn_name_monthly_adding_site_tables_consumer" {
   default = "monthly-adding-site-tables-consumer"
 }
+
+# Locals for reusable resources (ARNs)
+locals {
+  # AWS Configuration
+  aws_region  = "ap-northeast-1"
+  aws_account = "683918607581"
+  aws_shorthand = "${local.aws_region}:${local.aws_account}" # shorthand
+
+  # Resource ARNs
+  rds_secret_arn              = "arn:aws:secretsmanager:${local.aws_shorthand}:secret:rds/db-test-private*"
+  producer_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_producer}*"
+  consumer_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_consumer}*"
+  sns_topic_arn               = "arn:aws:sns:${local.aws_shorthand}:${var.sns_topic_monthly_adding_site_tables_notifications}"
+  step_functions_state_machine_arn = "arn:aws:states:${local.aws_shorthand}:stateMachine:${var.sfn_name_monthly_adding_site_tables_consumer}"
+
+  # ===================================================================
+  # IAM Policies organized by Service Type
+  # ===================================================================
+  
+  # Lambda Function Policies
+  lambda_policies = {
+    # Policy: Read RDS Secrets (used by both producer and consumer Lambda)
+    "read-rds-secrets" = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid      = "ReadRDSSecrets"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = local.rds_secret_arn
+      }]
+    })
+  }
+
+  # EventBridge Scheduler Policies
+  eventbridge_scheduler_policies = {
+    # Policy: Invoke Lambda (used by producer scheduler)
+    "invoke-lambda" = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid      = "InvokeLambdaFunction"
+        Effect   = "Allow"
+        Action   = ["lambda:InvokeFunction"]
+        Resource = [local.producer_lambda_arn]
+      }]
+    })
+    
+    # Policy: Execute Step Functions (used by consumer scheduler)
+    "execute-state-machine" = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid      = "StartStepFunctionExecution"
+        Effect   = "Allow"
+        Action   = ["states:StartExecution"]
+        Resource = [local.step_functions_state_machine_arn]
+      }]
+    })
+  }
+
+  # Step Functions Policies
+  step_functions_policies = {
+    # Policy: Invoke Lambda (used by consumer step function)
+    "invoke-lambda" = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid      = "InvokeLambdaFunction"
+        Effect   = "Allow"
+        Action   = ["lambda:InvokeFunction"]
+        Resource = [local.consumer_lambda_arn]
+      }]
+    })
+    
+    # Policy: Publish to SNS (used by consumer step function)
+    "publish-sns" = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid      = "PublishToSNSTopic"
+        Effect   = "Allow"
+        Action   = ["sns:Publish"]
+        Resource = [local.sns_topic_arn]
+      }]
+    })
+  }
+}
+
 module "heatmap_japan_dev" {
   source = "../../"
 
@@ -45,20 +129,8 @@ module "heatmap_japan_dev" {
       SITE_CHUNK_DAYS = 21
       RDS_SECRET_NAME = "rds/db-test-private"
     }
-
-    lambda_inline_policies = {
-      "${var.lambda_function_name_producer}-lambda-role" = jsonencode({
-        Version = "2012-10-17"
-        Statement = [
-          {
-            Sid      = "ReadRDSSecrets"
-            Effect   = "Allow"
-            Action   = ["secretsmanager:GetSecretValue"]
-            Resource = "arn:aws:secretsmanager:ap-northeast-1:683918607581:secret:rds/db-test-private*"
-          }
-        ]
-      })
-    }
+    
+    lambda_inline_policies = local.lambda_policies
 
     # VPC config
     create_security_group = true
@@ -70,22 +142,14 @@ module "heatmap_japan_dev" {
 
     # RDS Security Group
     rds_security_group_id = "sg-0ec24edb38ce58304"
-    
+
     # Secrets Manager End Point Security Group
     smg_end_point_sg_id = "sg-00ca8426775d6c9b3"
 
     # Scheduler configuration
     schedule_name = "monthly-adding-site-tables-producer-schedule"
     scheduler_inline_policies = {
-      "invoke-lambda" = jsonencode({
-        Version = "2012-10-17"
-        Statement = [{
-          Sid      = "InvokeLambdaFunction"
-          Effect   = "Allow"
-          Action   = ["lambda:InvokeFunction"]
-          Resource = ["arn:aws:lambda:ap-northeast-1:683918607581:function:${var.lambda_function_name_producer}*"]
-        }]
-      })
+      "invoke-lambda" = local.eventbridge_scheduler_policies["invoke-lambda"]
     }
 
     schedule_retry_policy = {
@@ -103,19 +167,7 @@ module "heatmap_japan_dev" {
       RDS_SECRET_NAME = "rds/db-test-private"
     }
 
-    lambda_inline_policies = {
-      "${var.lambda_function_name_consumer}-lambda-role" = jsonencode({
-        Version = "2012-10-17"
-        Statement = [
-          {
-            Sid      = "ReadRDSSecrets"
-            Effect   = "Allow"
-            Action   = ["secretsmanager:GetSecretValue"]
-            Resource = "arn:aws:secretsmanager:ap-northeast-1:683918607581:secret:rds/db-test-private*"
-          }
-        ]
-      })
-    }
+    lambda_inline_policies = local.lambda_policies
 
     # VPC config
     create_security_group = true
@@ -127,32 +179,13 @@ module "heatmap_japan_dev" {
 
     # RDS Security Group
     rds_security_group_id = "sg-0ec24edb38ce58304"
-    
+
     # Secrets Manager End Point Security Group
     smg_end_point_sg_id = "sg-00ca8426775d6c9b3"
 
     # Step Function configuration
     step_function_name = var.sfn_name_monthly_adding_site_tables_consumer
-    step_function_inline_policies = {
-      "invoke-lambda" = jsonencode({
-        Version = "2012-10-17"
-        Statement = [{
-          Sid      = "InvokeLambdaFunction"
-          Effect   = "Allow"
-          Action   = ["lambda:InvokeFunction"]
-          Resource = ["arn:aws:lambda:ap-northeast-1:683918607581:function:${var.lambda_function_name_consumer}*"]
-        }]
-      }),
-      "publish-sns" = jsonencode({
-        Version = "2012-10-17"
-        Statement = [{
-          Sid      = "PublishToSNSTopic"
-          Effect   = "Allow"
-          Action   = ["sns:Publish"]
-          Resource = ["arn:aws:sns:ap-northeast-1:683918607581:${var.sns_topic_monthly_adding_site_tables_notifications}"]
-        }]
-      })
-    }
+    step_function_inline_policies = local.step_functions_policies
 
     # SNS Topic configuration
     sns_topic_name          = var.sns_topic_monthly_adding_site_tables_notifications
@@ -163,17 +196,7 @@ module "heatmap_japan_dev" {
     schedule_name       = "monthly-adding-site-tables-consumer-schedule"
     schedule_expression = "cron(30 0 * * ? *)" # At 00:30 AM every day
     scheduler_inline_policies = {
-      "execute_state_machine" = jsonencode({
-        Version = "2012-10-17"
-        Statement = [
-          {
-            Sid      = "StartStepFunctionExecution"
-            Effect   = "Allow"
-            Action   = ["states:StartExecution"]
-            Resource = ["arn:aws:states:ap-northeast-1:683918607581:stateMachine:${var.sfn_name_monthly_adding_site_tables_consumer}"]
-          }
-        ]
-      })
+      "execute-state-machine" = local.eventbridge_scheduler_policies["execute-state-machine"]
     }
   }
 }
