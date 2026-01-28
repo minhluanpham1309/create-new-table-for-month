@@ -32,6 +32,14 @@ resource "aws_security_group" "lambda" {
   name_prefix = "${var.function_name}-"
   vpc_id      = var.vpc_config.vpc_id
   description = "Security group for Lambda function ${var.function_name}"
+  
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound traffic"
+  }
 
   tags = merge(
     var.tags,
@@ -102,7 +110,7 @@ resource "aws_lambda_function" "this" {
   source_code_hash = coalesce(var.source_code_hash, data.archive_file.dummy.output_base64sha256)
 
   lifecycle {
-    ignore_changes = [filename, source_code_hash]
+    ignore_changes = [filename, source_code_hash] # Ignore changes to avoid unnecessary updates
     
     precondition {
       condition     = var.vpc_config == null || var.create_security_group || length(try(var.vpc_config.security_group_ids, [])) > 0

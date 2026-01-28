@@ -23,6 +23,73 @@ provider "aws" {
   }
 }
 
+# Shared IAM Role for All Lambda Functions
+module "shared_lambda_role" {
+  source = "./modules/iam-role"
+
+  role_name = "${var.project_name}-lambda-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  inline_policies = merge(
+    try(var.monthly_adding_site_tables_producers.lambda_inline_policies, {}),
+    try(var.monthly_adding_site_tables_consumer.lambda_inline_policies, {})
+  )
+  
+  managed_policy_arns = ["arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"]
+
+  tags = var.tags
+}
+
+# Shared IAM Role for All Step Functions
+module "shared_step_functions_role" {
+  source = "./modules/iam-role"
+
+  role_name = "${var.project_name}-step-functions-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "states.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  inline_policies = merge(
+    try(var.monthly_adding_site_tables_consumer.step_function_inline_policies, {})
+  )
+
+  tags = var.tags
+}
+
+# Shared IAM Role for All EventBridge Schedulers
+module "shared_scheduler_role" {
+  source = "./modules/iam-role"
+
+  role_name = "${var.project_name}-scheduler-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "scheduler.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  inline_policies = merge(
+    try(var.monthly_adding_site_tables_producers.scheduler_inline_policies, {}),
+    try(var.monthly_adding_site_tables_consumer.scheduler_inline_policies, {})
+  )
+
+  tags = var.tags
+}
+
 # Valkey Module
 module "valkey" {
   source = "./modules/valkey"
@@ -72,7 +139,7 @@ module "monthly_adding_site_tables_producer" {
   lambda_environment_variables = var.monthly_adding_site_tables_producers.lambda_environment_variables
   lambda_log_retention_in_days = var.monthly_adding_site_tables_producers.lambda_log_retention_in_days
 
-  lambda_inline_policies = var.monthly_adding_site_tables_producers.lambda_inline_policies
+  lambda_role_arn = module.shared_lambda_role.role_arn
 
   # VPC
   vpc_config            = try(var.monthly_adding_site_tables_producers.vpc_config, null)
@@ -88,13 +155,13 @@ module "monthly_adding_site_tables_producer" {
   schedule_enabled             = var.monthly_adding_site_tables_producers.schedule_enabled
   schedule_input               = var.monthly_adding_site_tables_producers.schedule_input
 
-  scheduler_inline_policies = var.monthly_adding_site_tables_producers.scheduler_inline_policies
-  schedule_retry_policy     = var.monthly_adding_site_tables_producers.schedule_retry_policy
+  scheduler_role_arn    = module.shared_scheduler_role.role_arn
+  schedule_retry_policy = var.monthly_adding_site_tables_producers.schedule_retry_policy
 
   tags = merge(var.tags, try(var.monthly_adding_site_tables_producers.tags, {}))
 }
 
-# Monthly Adding Site Tables Producer (Lambda + EventBridge Scheduler)
+# Monthly Adding Site Tables Consumer (Lambda + Step Function + EventBridge Scheduler)
 module "monthly_adding_site_tables_consumer" {
   source = "./modules/monthly-adding-site-tables-consumer"
   count  = var.monthly_adding_site_tables_consumer == null ? 0 : 1
@@ -110,7 +177,7 @@ module "monthly_adding_site_tables_consumer" {
   lambda_environment_variables = var.monthly_adding_site_tables_consumer.lambda_environment_variables
   lambda_log_retention_in_days = var.monthly_adding_site_tables_consumer.lambda_log_retention_in_days
 
-  lambda_inline_policies = var.monthly_adding_site_tables_consumer.lambda_inline_policies
+  lambda_role_arn = module.shared_lambda_role.role_arn
 
   # VPC
   vpc_config            = try(var.monthly_adding_site_tables_consumer.vpc_config, null)
@@ -119,8 +186,8 @@ module "monthly_adding_site_tables_consumer" {
   smg_end_point_sg_id   = var.monthly_adding_site_tables_consumer.smg_end_point_sg_id 
 
   # Step Function
-  step_function_name            = var.monthly_adding_site_tables_consumer.step_function_name
-  step_function_inline_policies = var.monthly_adding_site_tables_consumer.step_function_inline_policies
+  step_function_name      = var.monthly_adding_site_tables_consumer.step_function_name
+  step_function_role_arn  = module.shared_step_functions_role.role_arn
 
   # SNS Configuration
   sns_topic_name          = var.monthly_adding_site_tables_consumer.sns_topic_name
@@ -135,7 +202,7 @@ module "monthly_adding_site_tables_consumer" {
   schedule_enabled             = var.monthly_adding_site_tables_consumer.schedule_enabled
   schedule_input               = var.monthly_adding_site_tables_consumer.schedule_input
 
-  scheduler_inline_policies = var.monthly_adding_site_tables_consumer.scheduler_inline_policies
+  scheduler_role_arn = module.shared_scheduler_role.role_arn
 
   tags = merge(var.tags, try(var.monthly_adding_site_tables_consumer.tags, {}))
 }
