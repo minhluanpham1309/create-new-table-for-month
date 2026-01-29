@@ -43,10 +43,24 @@ jobs:
         role-duration-seconds: 900
         aws-region: ${{ env.AWS_REGION }}
 
-    - name: Replace account ID in Step Function definition
+    - name: Prepare Step Function definition with account ID
       run: |
-        sed -i "s/{account_id}/${{ env.AWS_ACCOUNT_ID }}/g" ${{ env.STEP_FUNCTION_DIR }}/${{ env.STEP_FUNCTION_FILE }}
-        echo "Replaced {account_id} with ${{ env.AWS_ACCOUNT_ID }}"
+        # Create temporary file with replaced account ID
+        sed "s/{account_id}/${{ env.AWS_ACCOUNT_ID }}/g" ${{ env.STEP_FUNCTION_DIR }}/${{ env.STEP_FUNCTION_FILE }} > /tmp/step-function-definition.json
+        echo "Created temporary definition file with account ID: ${{ env.AWS_ACCOUNT_ID }}"
+
+    - name: Validate Step Function JSON syntax
+      run: |
+        echo "Validating JSON syntax..."
+        if ! jq empty /tmp/step-function-definition.json; then
+          echo "Error: Invalid JSON syntax in Step Function definition file"
+          exit 1
+        fi
+        echo "JSON syntax validation passed!"
+
+        # Display the processed definition for verification
+        echo "Step Function definition preview:"
+        jq -r '.Comment' /tmp/step-function-definition.json
 
     - name: Get Step Function ARN
       id: get-sfn-arn
@@ -54,12 +68,12 @@ jobs:
         SFN_ARN=$(aws stepfunctions list-state-machines \
           --query "stateMachines[?name=='${{ env.STEP_FUNCTION_NAME }}'].stateMachineArn" \
           --output text)
-        
+
         if [ -z "$SFN_ARN" ]; then
           echo "Error: Step Function '${{ env.STEP_FUNCTION_NAME }}' not found"
           exit 1
         fi
-        
+
         echo "sfn_arn=$SFN_ARN" >> $GITHUB_OUTPUT
         echo "Found Step Function: $SFN_ARN"
 
@@ -67,17 +81,18 @@ jobs:
       run: |
         aws stepfunctions update-state-machine \
           --state-machine-arn ${{ steps.get-sfn-arn.outputs.sfn_arn }} \
-          --definition file://${{ env.STEP_FUNCTION_DIR }}/${{ env.STEP_FUNCTION_FILE }}
+          --definition file:///tmp/step-function-definition.json
 
     - name: Wait for Step Function update
       run: |
         echo "Waiting for Step Function update to complete..."
         sleep 5
-        
+
         # Verify the update
         aws stepfunctions describe-state-machine \
           --state-machine-arn ${{ steps.get-sfn-arn.outputs.sfn_arn }} \
           --query 'status' \
           --output text
-        
+
         echo "Step Function deployment successful!"
+        
