@@ -61,7 +61,7 @@
               "Type": "Task",
               "Resource": "arn:aws:states:::sns:publish",
               "Parameters": {
-                "TopicArn": "arn:aws:sns:ap-northeast-1:{account_id}:monthly-table-creation-notifications",
+                "TopicArn": "arn:aws:sns:ap-northeast-1:{account_id}:monthly-adding-site-tables-notifications",
                 "Subject": "[Heat Map] Automatic create new table for storage",
                 "Message.$": "States.Format('Dear Administrator,\n\nI want notification for you good news!\n\nSystem just created new tables for monthly storage successfully.\n\nTotal count: {}\nSuccess count: {}\n\nBe careful please check again!\n\nThank you so much!\n\nMieruca Heatmap Machine', $.parsedResponse.body.result.total_sites, $.parsedResponse.body.result.total_sites_success)"
               },
@@ -92,7 +92,7 @@
               "Type": "Task",
               "Resource": "arn:aws:states:::sns:publish",
               "Parameters": {
-                "TopicArn": "arn:aws:sns:ap-northeast-1:{account_id}:monthly-table-creation-notifications",
+                "TopicArn": "arn:aws:sns:ap-northeast-1:{account_id}:monthly-adding-site-tables-notifications",
                 "Subject": "[Heat Map] Automatic create new table for storage",
                 "Message.$": "States.Format('Dear Administrator,\n\nI have bad news for you!\n\nSystem just created new tables for monthly storage but some failed.\n\nTotal count: {}\nError count: {}\n\nFailed site IDs:\n{}\n\nPlease check and make manual correction soon!\nReason mistake please check log system:\n/aws/lambda/MonthlyAddingSiteTablesConsumer\n\nThank you so much!\n\nMieruca Heatmap Machine', $.parsedResponse.body.result.total_sites, $.parsedResponse.body.result.total_sites_failed, States.JsonToString($.parsedResponse.body.result.failed_items))"
               },
@@ -112,7 +112,7 @@
       "Type": "Task",
       "Resource": "arn:aws:states:::sns:publish",
       "Parameters": {
-        "TopicArn": "arn:aws:sns:ap-northeast-1:{account_id}:monthly-table-creation-notifications",
+        "TopicArn": "arn:aws:sns:ap-northeast-1:{account_id}:monthly-adding-site-tables-notifications",
         "Subject": "[Heat Map] Automatic create new table for storage",
         "Message.$": "States.Format('Dear Administrator,\n\nI have bad news for you!\n\nSystem just failed to create new tables for monthly storage completely.\n\nTotal count: All sites\nError count: All sites\n\nError details:\n{}\n\nPlease check and make manual correction soon!\nReason mistake please check log system:\n/aws/lambda/MonthlyAddingSiteTablesConsumer\n\nTimestamp (UTC): {}\nNote: Add 9 hours for JST\n\nThank you so much!\n\nMieruca Heatmap Machine', $.error.Cause, $$.State.EnteredTime)"
       },
