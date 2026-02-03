@@ -19,7 +19,7 @@ env:
 
 jobs:
   test:
-    if: github.event.pull_request.state == 'open' || (github.event.pull_request.merged == true && startsWith(github.head_ref, 'feature/'))
+    if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'feature/')
     runs-on: ubuntu-latest
     
     steps:
@@ -74,7 +74,7 @@ jobs:
           --tb=short
 
   deploy:
-    if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'feature/')
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       id-token: write

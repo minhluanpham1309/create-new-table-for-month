@@ -242,7 +242,7 @@ def find_by_apply_on(connection, apply_on_date: str):
             cursor.execute(query, (apply_on_date,))
             row = cursor.fetchone()
 
-            logger.info(f"Found record ID={row['ID']} for APPLY_ON = {apply_on_date}")
+            logger.info(f"Found record for APPLY_ON = {apply_on_date}")
             return row
 
     except Exception as e:
