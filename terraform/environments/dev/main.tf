@@ -198,5 +198,10 @@ module "heatmap_japan_dev" {
     scheduler_inline_policies = {
       "execute-state-machine" = local.eventbridge_scheduler_policies["execute-state-machine"]
     }
+    
+    schedule_retry_policy = {
+      maximum_event_age_in_seconds = 900
+      maximum_retry_attempts       = 3
+    }
   }
 }
