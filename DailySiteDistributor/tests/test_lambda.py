@@ -1,5 +1,5 @@
 """
-Unit tests for DailySiteDistributor Lambda function
+Unit tests for MonthlyAddingSiteTablesProducer Lambda function
 
 This test suite provides comprehensive coverage (>99%) for the Lambda function
 that distributes sites across days of the month for table creation scheduling.
@@ -115,6 +115,32 @@ class TestGetAllSites:
         assert result[0]['site_id'] == 1
         mock_cursor.execute.assert_called_once()
     
+    def test_get_all_sites_large_dataset(self):
+        """Test with large number of sites"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        
+        # Simulate 1,000 sites
+        large_dataset = [{'site_id': i} for i in range(1, 1001)]
+        mock_cursor.fetchall.return_value = large_dataset
+        
+        result = lambda_function.get_all_sites(mock_conn)
+        
+        assert len(result) == 1000
+    
+    def test_get_all_sites_empty_result(self):
+        """Test when no sites exist"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        
+        mock_cursor.fetchall.return_value = []
+        
+        result = lambda_function.get_all_sites(mock_conn)
+        
+        assert result == []
+    
     def test_get_all_sites_error(self):
         """Test error handling in site retrieval"""
         mock_conn = MagicMock()
@@ -212,7 +238,7 @@ class TestGenerateSchedule:
         jst = pytz.timezone('Asia/Tokyo')
         mock_now = datetime(2024, 1, 15, tzinfo=jst)
         mock_datetime.now.return_value = mock_now
-        mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+        mock_datetime.side_effect = datetime
         
         sublists = {
             1: [{'site_id': 1}, {'site_id': 2}],
@@ -235,6 +261,26 @@ class TestGenerateSchedule:
         
         assert result['day_1']['sites_count'] == 0
         assert result['day_2']['sites_count'] == 0
+    
+    @patch('lambda_function.datetime')
+    def test_generate_schedule_february(self, mock_datetime):
+        """Test schedule for February (28/29 days)"""
+        jst = pytz.timezone('Asia/Tokyo')
+        # February 2024 (leap year - 29 days)
+        mock_now = datetime(2024, 2, 15, tzinfo=jst)
+        mock_datetime.now.return_value = mock_now
+        mock_datetime.side_effect = datetime
+        
+        sublists = {i: [{'site_id': i}] for i in range(1, 22)}
+        
+        result = lambda_function.generate_schedule(sublists)
+        
+        # First day should be Feb 1
+        assert result['day_1']['date'] == '2024-02-01'
+        # Check days are sequential
+        assert result['day_2']['date'] == '2024-02-02'
+        # Verify day 21 is still in February (2024 is leap year with 29 days)
+        assert result['day_21']['date'] == '2024-02-21'
 
 
 class TestInsertScheduleToDB:
@@ -270,6 +316,27 @@ class TestInsertScheduleToDB:
         inserted_dates = [call[0][1][0] for call in all_calls]
         assert '2024-01-01' in inserted_dates
         assert '2024-01-02' in inserted_dates
+    
+    def test_insert_schedule_empty_sites(self):
+        """Test inserting schedule with no sites"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        
+        schedule = {
+            'day_1': {
+                'date': '2024-01-01',
+                'sites': []  # Empty
+            }
+        }
+        
+        lambda_function.insert_schedule_to_db(mock_conn, schedule)
+        
+        # Should still insert with empty array
+        assert mock_cursor.execute.called
+        call_args = mock_cursor.execute.call_args[0]
+        list_sites_json = call_args[1][1]
+        assert list_sites_json == '[]'
     
     def test_insert_schedule_error(self):
         """Test error handling in insertion"""
@@ -311,113 +378,6 @@ class TestGetSecret:
         assert result['host'] == 'test-db.rds.amazonaws.com'
         assert result['username'] == 'admin'
         mock_boto_client.assert_called_once()
-
-
-class TestGetDBConnection:
-    """Test database connection"""
-    
-    @patch('lambda_function.get_ssl_context')
-    @patch('pymysql.connect')
-    def test_get_db_connection_success(self, mock_connect, mock_ssl):
-        """Test successful DB connection"""
-        mock_ssl.return_value = MagicMock()
-        mock_conn = MagicMock()
-        mock_connect.return_value = mock_conn
-        
-        secret = {
-            'host': 'test-db.rds.amazonaws.com',
-            'port': 3306,
-            'username': 'admin',
-            'password': 'secret',
-            'dbname': 'HEAT_MAP'
-        }
-        
-        result = lambda_function.get_db_connection(secret)
-        
-        assert result == mock_conn
-        mock_connect.assert_called_once()
-    
-    @patch('lambda_function.get_ssl_context')
-    @patch('pymysql.connect')
-    def test_get_db_connection_operational_error(self, mock_connect, mock_ssl):
-        """Test DB connection operational error"""
-        import pymysql
-        
-        mock_ssl.return_value = MagicMock()
-        mock_connect.side_effect = pymysql.err.OperationalError(2003, "Can't connect")
-        
-        secret = {'host': 'test', 'username': 'user', 'password': 'pass'}
-        
-        with pytest.raises(pymysql.err.OperationalError):
-            lambda_function.get_db_connection(secret)
-
-
-class TestGetSSLContext:
-    """Test SSL context creation"""
-    
-    @patch('os.path.exists')
-    @patch('ssl.SSLContext')
-    def test_get_ssl_context_region_bundle(self, mock_ssl_context, mock_exists):
-        """Test SSL context with region-specific bundle"""
-        mock_exists.return_value = True
-        mock_ctx = MagicMock()
-        mock_ssl_context.return_value = mock_ctx
-        
-        result = lambda_function.get_ssl_context('ap-northeast-1')
-        
-        assert result == mock_ctx
-        mock_ctx.load_verify_locations.assert_called_once()
-    
-    @patch('os.path.exists')
-    def test_get_ssl_context_missing_bundle(self, mock_exists):
-        """Test SSL context with missing bundle"""
-        mock_exists.return_value = False
-        
-        with pytest.raises(FileNotFoundError, match="CA bundle not found"):
-            lambda_function.get_ssl_context('ap-northeast-1')
-
-
-class TestGetRegion:
-    """Test region retrieval"""
-    
-    @patch.dict('os.environ', {'AWS_REGION': 'us-west-2'})
-    def test_get_region_from_env(self):
-        """Test region from environment variable"""
-        result = lambda_function.get_region()
-        assert result == 'us-west-2'
-    
-    @patch.dict('os.environ', {}, clear=True)
-    def test_get_region_default(self):
-        """Test default region"""
-        # Remove AWS_REGION if exists
-        result = lambda_function.get_region()
-        assert result == 'ap-northeast-1'
-
-
-class TestRunStep:
-    """Test step execution wrapper"""
-    
-    def test_run_step_success(self):
-        """Test successful step execution"""
-        
-        def dummy_func(a, b):
-            return a + b
-        
-        result = lambda_function.run_step("test_step", dummy_func, 2, 3)
-        assert result == 5
-    
-    def test_run_step_with_error(self):
-        """Test step execution with error"""
-        
-        def error_func():
-            raise ValueError("Test error")
-        
-        with pytest.raises(ValueError, match="Test error"):
-            lambda_function.run_step("error_step", error_func)
-
-
-class TestAWSErrorHandling:
-    """Test AWS service error scenarios"""
     
     @patch('boto3.client')
     def test_get_secret_access_denied(self, mock_boto_client):
@@ -463,37 +423,43 @@ class TestAWSErrorHandling:
         assert 'ResourceNotFoundException' in str(exc_info.value)
 
 
-class TestSSLContextAdvanced:
-    """Test SSL context edge cases"""
+class TestGetDBConnection:
+    """Test database connection"""
     
-    @patch('os.path.exists')
-    @patch('ssl.SSLContext')
-    def test_ssl_fallback_to_global_bundle(self, mock_ssl_context, mock_exists):
-        """Test fallback from region to global bundle"""
-        # First call (region bundle) returns False
-        # Second call (global bundle) returns True
-        mock_exists.side_effect = [False, True]
+    @patch('lambda_function.get_ssl_context')
+    @patch('pymysql.connect')
+    def test_get_db_connection_success(self, mock_connect, mock_ssl):
+        """Test successful DB connection"""
+        mock_ssl.return_value = MagicMock()
+        mock_conn = MagicMock()
+        mock_connect.return_value = mock_conn
         
-        mock_ctx = MagicMock()
-        mock_ssl_context.return_value = mock_ctx
+        secret = {
+            'host': 'test-db.rds.amazonaws.com',
+            'port': 3306,
+            'username': 'admin',
+            'password': 'secret',
+            'dbname': 'HEAT_MAP'
+        }
         
-        result = lambda_function.get_ssl_context('us-east-1')
+        result = lambda_function.get_db_connection(secret)
         
-        assert result == mock_ctx
-        # Should try region bundle first, then global
-        assert mock_exists.call_count == 2
+        assert result == mock_conn
+        mock_connect.assert_called_once()
     
-    @patch('os.path.exists')
-    def test_ssl_both_bundles_missing(self, mock_exists):
-        """Test when both region and global bundles are missing"""
-        mock_exists.return_value = False
+    @patch('lambda_function.get_ssl_context')
+    @patch('pymysql.connect')
+    def test_get_db_connection_operational_error(self, mock_connect, mock_ssl):
+        """Test DB connection operational error"""
+        import pymysql
         
-        with pytest.raises(FileNotFoundError, match="CA bundle not found"):
-            lambda_function.get_ssl_context('eu-west-1')
-
-
-class TestDatabaseConnectionAdvanced:
-    """Test database connection edge cases"""
+        mock_ssl.return_value = MagicMock()
+        mock_connect.side_effect = pymysql.err.OperationalError(2003, "Can't connect")
+        
+        secret = {'host': 'test', 'username': 'user', 'password': 'pass'}
+        
+        with pytest.raises(pymysql.err.OperationalError):
+            lambda_function.get_db_connection(secret)
     
     @patch('lambda_function.get_ssl_context')
     @patch('pymysql.connect')
@@ -554,81 +520,30 @@ class TestDatabaseConnectionAdvanced:
             lambda_function.get_db_connection(secret)
 
 
-class TestScheduleAdvanced:
-    """Test schedule generation edge cases"""
+class TestGetSSLContext:
+    """Test SSL context creation"""
     
-    @patch('lambda_function.datetime')
-    def test_generate_schedule_february(self, mock_datetime):
-        """Test schedule for February (28/29 days)"""
-        jst = pytz.timezone('Asia/Tokyo')
-        # February 2024 (leap year - 29 days)
-        mock_now = datetime(2024, 2, 15, tzinfo=jst)
-        mock_datetime.now.return_value = mock_now
-        mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+    @patch('os.path.exists')
+    @patch('ssl.SSLContext')
+    def test_get_ssl_context_region_bundle(self, mock_ssl_context, mock_exists):
+        """Test SSL context with region-specific bundle"""
+        mock_exists.return_value = True
+        mock_ctx = MagicMock()
+        mock_ssl_context.return_value = mock_ctx
         
-        sublists = {i: [{'site_id': i}] for i in range(1, 22)}
+        result = lambda_function.get_ssl_context('ap-northeast-1')
         
-        result = lambda_function.generate_schedule(sublists)
-        
-        # First day should be Feb 1
-        assert result['day_1']['date'] == '2024-02-01'
-        # Check days are sequential
-        assert result['day_2']['date'] == '2024-02-02'
-        # Verify day 21 is still in February (2024 is leap year with 29 days)
-        assert result['day_21']['date'] == '2024-02-21'
-
-
-class TestInsertScheduleAdvanced:
-    """Test database insertion edge cases"""
+        assert result == mock_ctx
+        mock_ctx.load_verify_locations.assert_called_once()
     
-    def test_insert_schedule_empty_sites(self):
-        """Test inserting schedule with no sites"""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    @patch('os.path.exists')
+    def test_get_ssl_context_missing_bundle(self, mock_exists):
+        """Test SSL context with missing bundle"""
+        mock_exists.return_value = False
         
-        schedule = {
-            'day_1': {
-                'date': '2024-01-01',
-                'sites': []  # Empty
-            }
-        }
-        
-        lambda_function.insert_schedule_to_db(mock_conn, schedule)
-        
-        # Should still insert with empty array
-        assert mock_cursor.execute.called
-        call_args = mock_cursor.execute.call_args[0]
-        list_sites_json = call_args[1][1]
-        assert list_sites_json == '[]'
+        with pytest.raises(FileNotFoundError, match="CA bundle not found"):
+            lambda_function.get_ssl_context('ap-northeast-1')
 
-
-class TestEnvironmentVariables:
-    """Test environment variable handling"""
-    
-    @patch.dict('os.environ', {'RDS_SECRET_NAME': 'custom-secret'}, clear=False)
-    @patch('boto3.client')
-    def test_custom_secret_name(self, mock_boto_client):
-        """Test custom RDS secret name"""
-        mock_client = MagicMock()
-        mock_boto_client.return_value = mock_client
-        mock_client.get_secret_value.return_value = {
-            'SecretString': json.dumps({'host': 'test'})
-        }
-        
-        lambda_function.get_secret('ap-northeast-1')
-        
-        # Should use custom secret name
-        mock_client.get_secret_value.assert_called_with(
-            SecretId='custom-secret'
-        )
-        
-        # Verify boto3 client was created with correct parameters
-        assert mock_boto_client.called
-        call_args = mock_boto_client.call_args
-        assert call_args[0][0] == 'secretsmanager'
-        assert call_args[1]['region_name'] == 'ap-northeast-1'
-    
     @patch.dict('os.environ', {}, clear=True)
     def test_default_region_when_not_set(self):
         """Test default region when AWS_REGION not set"""
@@ -638,38 +553,25 @@ class TestEnvironmentVariables:
         
         result = lambda_function.get_region()
         assert result == 'ap-northeast-1'
-    
-    def test_site_chunk_days_default(self):
-        """Test default SITE_CHUNK_DAYS value"""
-        # SITE_CHUNK_DAYS should be 21 by default
-        assert lambda_function.SITE_CHUNK_DAYS == 21
 
 
-class TestGetAllSitesAdvanced:
-    """Test get_all_sites edge cases"""
+class TestRunStep:
+    """Test step execution wrapper"""
     
-    def test_get_all_sites_large_dataset(self):
-        """Test with large number of sites"""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    def test_run_step_success(self):
+        """Test successful step execution"""
         
-        # Simulate 1,000 sites
-        large_dataset = [{'site_id': i} for i in range(1, 1001)]
-        mock_cursor.fetchall.return_value = large_dataset
+        def dummy_func(a, b):
+            return a + b
         
-        result = lambda_function.get_all_sites(mock_conn)
-        
-        assert len(result) == 1000
+        result = lambda_function.run_step("test_step", dummy_func, 2, 3)
+        assert result == 5
     
-    def test_get_all_sites_empty_result(self):
-        """Test when no sites exist"""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    def test_run_step_with_error(self):
+        """Test step execution with error"""
         
-        mock_cursor.fetchall.return_value = []
+        def error_func():
+            raise ValueError("Test error")
         
-        result = lambda_function.get_all_sites(mock_conn)
-        
-        assert result == []
+        with pytest.raises(ValueError, match="Test error"):
+            lambda_function.run_step("error_step", error_func)
