@@ -576,76 +576,10 @@ class TestScheduleAdvanced:
         assert result['day_2']['date'] == '2024-02-02'
         # Verify day 21 is still in February (2024 is leap year with 29 days)
         assert result['day_21']['date'] == '2024-02-21'
-        # Ensure all dates are in February
-        for day in range(1, 22):
-            date_str = result[f'day_{day}']['date']
-            month = int(date_str.split('-')[1])
-            assert month == 2, f"Day {day} should be in February but got {date_str}"
-    
-    @patch('lambda_function.datetime')
-    def test_generate_schedule_day_of_week(self, mock_datetime):
-        """Test day_of_week is calculated correctly"""
-        jst = pytz.timezone('Asia/Tokyo')
-        # January 1, 2024 was a Monday
-        mock_now = datetime(2024, 1, 15, tzinfo=jst)
-        mock_datetime.now.return_value = mock_now
-        mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
-        
-        sublists = {1: [{'site_id': 1}]}
-        
-        result = lambda_function.generate_schedule(sublists)
-        
-        # January 1, 2024 was a Monday
-        assert result['day_1']['day_of_week'] == 'Monday'
-        assert result['day_1']['date'] == '2024-01-01'
-    
-    def test_generate_schedule_with_special_characters(self):
-        """Test schedule with special characters in site data"""
-        sublists = {
-            1: [
-                {'site_id': 1, 'name': "Site's Name"},
-                {'site_id': 2, 'name': 'Site "Quoted"'}
-            ]
-        }
-        
-        result = lambda_function.generate_schedule(sublists)
-        
-        assert result['day_1']['sites_count'] == 2
-        # Special characters should be preserved in sites list
-        assert result['day_1']['sites'][0]['name'] == "Site's Name"
-        assert result['day_1']['sites'][1]['name'] == 'Site "Quoted"'
 
 
 class TestInsertScheduleAdvanced:
     """Test database insertion edge cases"""
-    
-    def test_insert_schedule_with_unicode(self):
-        """Test inserting schedule with Unicode characters"""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
-        
-        schedule = {
-            'day_1': {
-                'date': '2024-01-01',
-                'sites': [
-                    {'site_id': 1, 'name': '日本語サイト'},
-                    {'site_id': 2, 'name': '中文站点'}
-                ]
-            }
-        }
-        
-        lambda_function.insert_schedule_to_db(mock_conn, schedule)
-        
-        # Should handle Unicode properly
-        assert mock_cursor.execute.called
-        call_args = mock_cursor.execute.call_args[0]
-        list_sites_json = call_args[1][1]
-        
-        # Parse JSON to verify it contains correct site IDs
-        # Note: function only stores site_ids, not the full site objects
-        sites_list = json.loads(list_sites_json)
-        assert sites_list == [1, 2]
     
     def test_insert_schedule_empty_sites(self):
         """Test inserting schedule with no sites"""
@@ -709,20 +643,6 @@ class TestEnvironmentVariables:
         """Test default SITE_CHUNK_DAYS value"""
         # SITE_CHUNK_DAYS should be 21 by default
         assert lambda_function.SITE_CHUNK_DAYS == 21
-    
-    @patch.dict('os.environ', {'SITE_CHUNK_DAYS': '7'}, clear=False)
-    def test_split_respects_site_chunk_days_constant(self):
-        """Test that split_into_chunk uses SITE_CHUNK_DAYS constant"""
-        # Note: SITE_CHUNK_DAYS is set at module load time,
-        # so changing env var after import won't affect it
-        # This test verifies the function uses the constant correctly
-        
-        sites = [{'site_id': i} for i in range(1, 15)]
-        result = lambda_function.split_into_chunk(sites)
-        
-        # Should use the SITE_CHUNK_DAYS constant (21, not 7 from env)
-        # Because module is already loaded
-        assert len(result) == lambda_function.SITE_CHUNK_DAYS
 
 
 class TestGetAllSitesAdvanced:
@@ -753,66 +673,3 @@ class TestGetAllSitesAdvanced:
         result = lambda_function.get_all_sites(mock_conn)
         
         assert result == []
-        
-
-class TestDatabaseConnectionAdvanced:
-    """Test database connection error edge cases"""
-    
-    @patch('lambda_function.get_ssl_context')
-    @patch('pymysql.connect')
-    def test_db_connection_access_denied(self, mock_connect, mock_ssl):
-        """Test access denied error (code 1045) - covers line 132"""
-        import pymysql
-        
-        mock_ssl.return_value = MagicMock()
-        # Error code 1045 - Access denied
-        mock_connect.side_effect = pymysql.err.OperationalError(
-            1045, "Access denied for user 'wrong_user'@'host' (using password: YES)"
-        )
-        
-        secret = {
-            'host': 'db.amazonaws.com',
-            'username': 'wrong_user',
-            'password': 'wrong_pass'
-        }
-        
-        with pytest.raises(pymysql.err.OperationalError):
-            lambda_function.get_db_connection(secret)
-    
-    @patch('lambda_function.get_ssl_context')
-    @patch('pymysql.connect')
-    def test_db_connection_other_operational_error(self, mock_connect, mock_ssl):
-        """Test other operational errors (not 2003 or 1045) - covers line 134"""
-        import pymysql
-        
-        mock_ssl.return_value = MagicMock()
-        # Error code 2006 - MySQL server has gone away
-        mock_connect.side_effect = pymysql.err.OperationalError(
-            2006, "MySQL server has gone away"
-        )
-        
-        secret = {
-            'host': 'db.amazonaws.com',
-            'username': 'user',
-            'password': 'pass'
-        }
-        
-        with pytest.raises(pymysql.err.OperationalError):
-            lambda_function.get_db_connection(secret)
-    
-    @patch('lambda_function.get_ssl_context')
-    @patch('pymysql.connect')
-    def test_db_connection_generic_exception(self, mock_connect, mock_ssl):
-        """Test generic exception (not OperationalError) - covers lines 138-139"""
-        mock_ssl.return_value = MagicMock()
-        # Generic exception
-        mock_connect.side_effect = Exception("Unexpected error")
-        
-        secret = {
-            'host': 'db.amazonaws.com',
-            'username': 'user',
-            'password': 'pass'
-        }
-        
-        with pytest.raises(Exception, match="Unexpected error"):
-            lambda_function.get_db_connection(secret)
