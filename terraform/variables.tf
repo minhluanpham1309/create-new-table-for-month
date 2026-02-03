@@ -221,6 +221,10 @@ variable "monthly_adding_site_tables_consumer" {
     schedule_enabled             = optional(bool, true)
     schedule_input               = optional(any, {})
     scheduler_inline_policies    = optional(map(string), {})
+    schedule_retry_policy = object({
+      maximum_event_age_in_seconds = number
+      maximum_retry_attempts       = number
+    })
 
     # Tags
     tags = optional(map(string), {})

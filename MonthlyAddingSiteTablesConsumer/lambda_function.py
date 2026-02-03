@@ -209,6 +209,7 @@ def get_db_connection(secret):
 
     except Exception as e:
         logger.error(f"Failed to connect to database: {str(e)}")
+        raise
 
 
 def get_all_sites(connection):
@@ -280,7 +281,6 @@ def create_tables_for_sites(cnx, site_list: list, list_hm_site: list, next_month
 
             for table_suffix in table_suffixes:
                 create_monthly_table(cnx, site_id, table_suffix, next_month)
-
 
         except Exception as e:
             result.total_sites_failed += 1
