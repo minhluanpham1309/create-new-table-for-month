@@ -25,6 +25,7 @@ import pytz
 # Import Lambda function
 import lambda_function
 
+
 class TestLambdaHandler:
     """Test main Lambda handler"""
     
@@ -212,7 +213,7 @@ class TestGenerateSchedule:
         jst = pytz.timezone('Asia/Tokyo')
         mock_now = datetime(2024, 1, 15, tzinfo=jst)
         mock_datetime.now.return_value = mock_now
-        mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+        mock_datetime.side_effect = datetime
         
         sublists = {
             1: [{'site_id': 1}, {'site_id': 2}],
@@ -564,7 +565,7 @@ class TestScheduleAdvanced:
         # February 2024 (leap year - 29 days)
         mock_now = datetime(2024, 2, 15, tzinfo=jst)
         mock_datetime.now.return_value = mock_now
-        mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+        mock_datetime.side_effect = datetime
         
         sublists = {i: [{'site_id': i}] for i in range(1, 22)}
         
