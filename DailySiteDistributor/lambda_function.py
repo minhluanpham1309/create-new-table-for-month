@@ -137,6 +137,7 @@ def get_db_connection(secret):
 
     except Exception as e:
         logger.error(f"Failed to connect to database: {str(e)}")
+        raise 
 
 
 def get_all_sites(connection) -> List[Dict[str, Any]]:
