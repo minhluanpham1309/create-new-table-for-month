@@ -206,3 +206,11 @@ module "monthly_adding_site_tables_consumer" {
 
   tags = merge(var.tags, try(var.monthly_adding_site_tables_consumer.tags, {}))
 }
+# 
+# module "vpc-endpoint" {
+# 
+#   source = ""
+#   environment = ""
+#   subnet_ids = []
+#   vpc_id = ""
+# }
