@@ -18,12 +18,64 @@ env:
   LAMBDA_FUNCTION_NAME: MonthlyAddingSiteTablesConsumer
   LAMBDA_DIR: MonthlyAddingSiteTablesConsumer
 
-jobs:
+jobs:  
+  test:
+      if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'feature/')
+      runs-on: ubuntu-latest
+      
+      steps:
+      - uses: actions/checkout@v3
+  
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+  
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+  
+      - name: Install dependencies
+        run: |
+          cd ${{ env.DIRECTORY_NAME }}
+          python -m pip install --upgrade pip
+          
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          
+          if [ -f requirements-dev.txt ]; then
+            pip install -r requirements-dev.txt
+          else
+            pip install pytest pytest-cov pytest-mock
+          fi
+  
+      - name: Run linting
+        run: |
+          cd ${{ env.DIRECTORY_NAME }}
+          pip install flake8
+          
+          # Stop build if there are syntax errors
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=build,tests,venv,.venv
+          
+          # Warnings only
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics --exclude=build,tests,venv,.venv
+  
+      - name: Run unit tests with coverage
+        run: |
+          cd ${{ env.DIRECTORY_NAME }}
+          pytest tests/ -v \
+            --cov=. \
+            --cov-report=term-missing:skip-covered \
+            --cov-fail-under=80 \
+            --tb=short
+
   deploy:
-    # Run workflow when:
-    # - PR merged to develop from feature/* branch, OR
-    # - PR merged to main from release/* or hotfix/* branch
-    if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'feature/')
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       id-token: write
