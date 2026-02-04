@@ -519,7 +519,7 @@ class TestUpdateLog:
 
 
 class TestGetSecret:
-    """Test AWS Secrets Manager"""
+    """Test AWS Secrets Manager"""  
     
     @patch('boto3.client')
     def test_get_secret_success(self, mock_boto_client):

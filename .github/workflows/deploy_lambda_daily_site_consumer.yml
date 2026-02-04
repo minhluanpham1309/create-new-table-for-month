@@ -41,7 +41,7 @@ jobs:
   
       - name: Install dependencies
         run: |
-          cd ${{ env.DIRECTORY_NAME }}
+          cd ${{ env.LAMBDA_DIR }}
           python -m pip install --upgrade pip
           
           if [ -f requirements.txt ]; then
@@ -56,7 +56,7 @@ jobs:
   
       - name: Run linting
         run: |
-          cd ${{ env.DIRECTORY_NAME }}
+          cd ${{ env.LAMBDA_DIR }}
           pip install flake8
           
           # Stop build if there are syntax errors
@@ -67,7 +67,7 @@ jobs:
   
       - name: Run unit tests with coverage
         run: |
-          cd ${{ env.DIRECTORY_NAME }}
+          cd ${{ env.LAMBDA_DIR }}
           pytest tests/ -v \
             --cov=. \
             --cov-report=term-missing:skip-covered \
