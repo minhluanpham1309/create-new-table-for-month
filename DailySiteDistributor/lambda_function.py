@@ -27,6 +27,7 @@ logger.setLevel(logging.INFO)
 
 SITE_CHUNK_DAYS = int(os.getenv("SITE_CHUNK_DAYS", 21))
 
+
 def lambda_handler(event=None, context=None):
     cnx = None
     cursor = None
@@ -67,6 +68,7 @@ def lambda_handler(event=None, context=None):
         if cnx:
             cnx.close()
 
+
 def get_ssl_context(region: str = 'ap-northeast-1'):
     """Create SSL context with TLS 1.2+ (download CA bundle from AWS)"""
     try:
@@ -98,6 +100,7 @@ def get_ssl_context(region: str = 'ap-northeast-1'):
     except Exception as e:
         logger.error(f"Failed to create SSL context: {str(e)}")
         raise
+
 
 def get_db_connection(secret):
     try:
@@ -137,6 +140,7 @@ def get_db_connection(secret):
 
     except Exception as e:
         logger.error(f"Failed to connect to database: {str(e)}")
+        raise
 
 
 def get_all_sites(connection) -> List[Dict[str, Any]]:
@@ -158,6 +162,7 @@ def get_all_sites(connection) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching sites: {str(e)}")
         raise
 
+
 def split_into_chunk(sites: List[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
     if not sites:
         logger.error("No sites to split...")
@@ -178,6 +183,7 @@ def split_into_chunk(sites: List[Dict[str, Any]]) -> Dict[int, List[Dict[str, An
     # Convert to dict
     return {day: chunk.tolist() for day, chunk in enumerate(chunks, 1)}
 
+
 def generate_schedule(sublists: Dict[int, List[Dict[str, Any]]]) -> Dict[str, Any]:
 
     # Start_date is 01 st every month
@@ -196,6 +202,7 @@ def generate_schedule(sublists: Dict[int, List[Dict[str, Any]]]) -> Dict[str, An
         for day in sublists.keys()
     }
 
+
 def insert_schedule_to_db(connection, schedule: Dict[str, Any]):
     try:
         with connection.cursor() as cursor:
@@ -203,7 +210,7 @@ def insert_schedule_to_db(connection, schedule: Dict[str, Any]):
             insert_query = """
                            INSERT INTO HEAT_MAP.MONTHLY_ADDING_SITE_TABLES
                                (APPLY_ON, LIST_SITES)
-                           VALUES (%s, %s) 
+                           VALUES (%s, %s)
                            ON DUPLICATE KEY UPDATE
                                 LIST_SITES = VALUES(LIST_SITES)
                            """
@@ -225,6 +232,7 @@ def insert_schedule_to_db(connection, schedule: Dict[str, Any]):
         logger.error(f"Error inserting schedule to database: {str(e)}")
         raise
 
+
 def get_secret(region):
     secret_name = os.environ.get('RDS_SECRET_NAME', 'rds/db-test-private')
 
@@ -243,9 +251,11 @@ def get_secret(region):
 
     return json.loads(response['SecretString'])
 
+
 def get_region() -> str:
     region_name = os.environ.get('AWS_REGION', 'ap-northeast-1')
     return region_name
+
 
 def run_step(step_name: str, func, *args, **kwargs):
     try:
@@ -260,6 +270,7 @@ def run_step(step_name: str, func, *args, **kwargs):
         logger.error(f"Exception: {str(e)}")
         logger.error("")
         raise
+
 
 if __name__ == "__main__":
     lambda_handler()

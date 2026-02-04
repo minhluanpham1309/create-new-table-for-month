@@ -201,6 +201,7 @@ module "monthly_adding_site_tables_consumer" {
   schedule_expression_timezone = var.monthly_adding_site_tables_consumer.schedule_expression_timezone
   schedule_enabled             = var.monthly_adding_site_tables_consumer.schedule_enabled
   schedule_input               = var.monthly_adding_site_tables_consumer.schedule_input
+  schedule_retry_policy        = var.monthly_adding_site_tables_consumer.schedule_retry_policy
 
   scheduler_role_arn = module.shared_scheduler_role.role_arn
 

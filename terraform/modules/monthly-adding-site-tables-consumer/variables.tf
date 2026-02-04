@@ -139,3 +139,11 @@ variable "scheduler_role_arn" {
   description = "IAM role ARN for EventBridge Scheduler"
   type        = string
 }
+
+variable "schedule_retry_policy" {
+  description = "Retry policy for EventBridge Scheduler"
+  type = object({
+    maximum_event_age_in_seconds = number
+    maximum_retry_attempts       = number
+  })
+}

@@ -1,0 +1,98 @@
+name: Deploy Monthly Adding Site Tables Step Function
+
+on:
+  pull_request:
+    branches:
+      - 'develop'
+      - 'main'
+    types:
+      - closed
+    paths:
+      - 'MonthlyAddingSiteTablesConsumerSfn/**'
+
+env:
+  AWS_REGION: ap-northeast-1
+  AWS_ACCOUNT_ID: 683918607581 # Account ID of the AWS account for DEVELOPMENT environment
+  GITHUB_OIDC_ROLE: HeatmapJapan-GithubAction
+  STEP_FUNCTION_NAME: monthly-adding-site-tables-consumer
+  STEP_FUNCTION_DIR: MonthlyAddingSiteTablesConsumerSfn
+  STEP_FUNCTION_FILE: monthly-adding-site-tables-consumer.json
+
+jobs:
+  deploy:
+    # Run workflow when:
+    # - PR merged to develop from feature/* branch, OR
+    # - PR merged to main from release/* or hotfix/* branch
+    if: |
+      github.event.pull_request.merged == true && (
+        (github.base_ref == 'develop' && startsWith(github.head_ref, 'feature/')) ||
+        (github.base_ref == 'main' && (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')))
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_OIDC_ROLE }}
+        role-duration-seconds: 900
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Prepare Step Function definition with account ID
+      run: |
+        # Create temporary file with replaced account ID
+        sed "s/{account_id}/${{ env.AWS_ACCOUNT_ID }}/g" ${{ env.STEP_FUNCTION_DIR }}/${{ env.STEP_FUNCTION_FILE }} > /tmp/step-function-definition.json
+        echo "Created temporary definition file with account ID: ${{ env.AWS_ACCOUNT_ID }}"
+
+    - name: Validate Step Function JSON syntax
+      run: |
+        echo "Validating JSON syntax..."
+        if ! jq empty /tmp/step-function-definition.json; then
+          echo "Error: Invalid JSON syntax in Step Function definition file"
+          exit 1
+        fi
+        echo "JSON syntax validation passed!"
+
+        # Display the processed definition for verification
+        echo "Step Function definition preview:"
+        jq -r '.Comment' /tmp/step-function-definition.json
+
+    - name: Get Step Function ARN
+      id: get-sfn-arn
+      run: |
+        SFN_ARN=$(aws stepfunctions list-state-machines \
+          --query "stateMachines[?name=='${{ env.STEP_FUNCTION_NAME }}'].stateMachineArn" \
+          --output text)
+
+        if [ -z "$SFN_ARN" ]; then
+          echo "Error: Step Function '${{ env.STEP_FUNCTION_NAME }}' not found"
+          exit 1
+        fi
+
+        echo "sfn_arn=$SFN_ARN" >> $GITHUB_OUTPUT
+        echo "Found Step Function: $SFN_ARN"
+
+    - name: Update Step Function definition
+      run: |
+        aws stepfunctions update-state-machine \
+          --state-machine-arn ${{ steps.get-sfn-arn.outputs.sfn_arn }} \
+          --definition file:///tmp/step-function-definition.json
+
+    - name: Wait for Step Function update
+      run: |
+        echo "Waiting for Step Function update to complete..."
+        sleep 5
+
+        # Verify the update
+        aws stepfunctions describe-state-machine \
+          --state-machine-arn ${{ steps.get-sfn-arn.outputs.sfn_arn }} \
+          --query 'status' \
+          --output text
+
+        echo "Step Function deployment successful!"
+        

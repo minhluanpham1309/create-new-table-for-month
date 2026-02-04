@@ -28,6 +28,7 @@ DATABASE_TEMPLATE_NAME = 'monthly_heatmap_table_template'
 
 jst = pytz.timezone('Asia/Tokyo')
 
+
 class ResultCreatedTable:
 
     def __init__(self):
@@ -43,6 +44,7 @@ class ResultCreatedTable:
             'total_sites_failed': self.total_sites_failed,
             'failed_items': self.failed_items
         }
+
 
 class SearchDate:
     def __init__(self, date: datetime):
@@ -61,6 +63,7 @@ class SearchDate:
     def plus_months(self, months: int):
         new_date = self.date + relativedelta(months=months)
         return SearchDate(new_date)
+
 
 def lambda_handler(event=None, context=None):
     cnx = None
@@ -139,6 +142,7 @@ def lambda_handler(event=None, context=None):
         if cnx:
             cnx.close()
 
+
 def get_ssl_context(region: str = 'ap-northeast-1'):
     """Create SSL context with TLS 1.2+ (download CA bundle from AWS)"""
     try:
@@ -170,6 +174,7 @@ def get_ssl_context(region: str = 'ap-northeast-1'):
     except Exception as e:
         logger.error(f"Failed to create SSL context: {str(e)}")
         raise
+
 
 def get_db_connection(secret):
     try:
@@ -209,6 +214,7 @@ def get_db_connection(secret):
 
     except Exception as e:
         logger.error(f"Failed to connect to database: {str(e)}")
+        raise
 
 
 def get_all_sites(connection):
@@ -241,7 +247,7 @@ def find_by_apply_on(connection, apply_on_date: str):
             cursor.execute(query, (apply_on_date,))
             row = cursor.fetchone()
 
-            logger.info(f"Found record ID={row['ID']} for APPLY_ON = {apply_on_date}")
+            logger.info(f"Found record for APPLY_ON = {apply_on_date}")
             return row
 
     except Exception as e:
@@ -281,7 +287,6 @@ def create_tables_for_sites(cnx, site_list: list, list_hm_site: list, next_month
             for table_suffix in table_suffixes:
                 create_monthly_table(cnx, site_id, table_suffix, next_month)
 
-
         except Exception as e:
             result.total_sites_failed += 1
             result.failed_items.append(site_id)
@@ -289,6 +294,7 @@ def create_tables_for_sites(cnx, site_list: list, list_hm_site: list, next_month
 
     result.total_sites_success = result.total_sites - result.total_sites_failed
     return result
+
 
 def update_log(cnx, result: ResultCreatedTable, row_id: int):
     try:
@@ -304,7 +310,7 @@ def update_log(cnx, result: ResultCreatedTable, row_id: int):
                     UPDATE HEAT_MAP.MONTHLY_ADDING_SITE_TABLES
                     SET LOG      = %s,
                         IS_ADDED = 1
-                    WHERE ID = %s 
+                    WHERE ID = %s
                     """
             cursor.execute(query, (log_message, row_id))
             logger.info(f"Updated LOG for record ID {row_id}")
@@ -312,6 +318,7 @@ def update_log(cnx, result: ResultCreatedTable, row_id: int):
     except Exception as e:
         logger.error(f"Error updating log for record {row_id}: {str(e)}")
         raise
+
 
 def get_secret(region):
     secret_name = os.environ.get('RDS_SECRET_NAME', 'rds/db-test-private')
@@ -331,9 +338,11 @@ def get_secret(region):
 
     return json.loads(response['SecretString'])
 
+
 def get_region() -> str:
     region_name = os.environ.get('AWS_REGION', 'ap-northeast-1')
     return region_name
+
 
 def run_step(step_name: str, func, *args, **kwargs):
     try:
@@ -348,6 +357,7 @@ def run_step(step_name: str, func, *args, **kwargs):
         logger.error(f"Exception: {str(e)}")
         logger.error("")
         raise
+
 
 if __name__ == "__main__":
     lambda_handler()

@@ -68,6 +68,7 @@ module "schedule" {
   schedule_expression_timezone = var.schedule_expression_timezone
   enabled                      = var.schedule_enabled
   scheduler_role_arn           = var.scheduler_role_arn
+  retry_policy                 = var.schedule_retry_policy
 
   target = {
     type  = "step_function"
