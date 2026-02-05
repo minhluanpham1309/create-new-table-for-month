@@ -1,0 +1,66 @@
+name: 'Python Lambda Build'
+description: 'Build and package Python Lambda function with dependencies'
+
+inputs:
+  python-version:
+    description: 'Python version to use'
+    required: true
+    default: '3.11'
+  lambda-dir:
+    description: 'Lambda function directory path'
+    required: true
+  aws-region:
+    description: 'AWS region for RDS SSL certificate'
+    required: true
+    default: 'ap-northeast-1'
+  include-rds-cert:
+    description: 'Whether to include RDS SSL certificate'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Download RDS SSL Certificate
+      if: inputs.include-rds-cert == 'true'
+      shell: bash
+      run: |
+        cd ${{ inputs.lambda-dir }}
+        mkdir -p certs
+        curl -o certs/${{ inputs.aws-region }}-bundle.pem \
+          https://truststore.pki.rds.amazonaws.com/${{ inputs.aws-region }}/${{ inputs.aws-region }}-bundle.pem
+
+    - name: Build Lambda package
+      shell: bash
+      run: |
+        cd ${{ inputs.lambda-dir }}
+        mkdir -p build
+        
+        # Install dependencies if requirements.txt exists
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt -t build/ --upgrade
+        fi
+        
+        # Copy Lambda function
+        cp -r *.py build/
+        
+        # Copy SSL certificate if exists
+        if [ -d certs ]; then
+          cp -r certs build/
+        fi
+
+    - name: Create deployment package
+      shell: bash
+      run: |
+        cd ${{ inputs.lambda-dir }}/build
+        zip -r ../deployment-package.zip . -x "*.pyc" -x "*__pycache__*" -x "*.dist-info/*"
+
+    - name: Cleanup downloaded certificate
+      if: inputs.include-rds-cert == 'true'
+      shell: bash
+      run: rm -rf ${{ inputs.lambda-dir }}/certs/

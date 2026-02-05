@@ -18,58 +18,27 @@ env:
   LAMBDA_FUNCTION_NAME: MonthlyAddingSiteTablesConsumer
   LAMBDA_DIR: MonthlyAddingSiteTablesConsumer
 
-jobs:  
+jobs:
   test:
-      if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'feature/')
-      runs-on: ubuntu-latest
-      
-      steps:
+    # Run workflow when:
+    # - PR merged to develop from feature/* branch, OR
+    # - PR merged to main from release/* or hotfix/* branch
+    if: |
+      github.event.pull_request.merged == true && (
+        (github.base_ref == 'develop' && startsWith(github.head_ref, 'feature/')) ||
+        (github.base_ref == 'main' && (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')))
+      )
+    runs-on: ubuntu-latest
+
+    steps:
       - uses: actions/checkout@v3
-  
-      - name: Set up Python
-        uses: actions/setup-python@v4
+
+      - name: Test Lambda
+        uses: ./.github/actions/python-lambda-test
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-  
-      - name: Cache pip dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-  
-      - name: Install dependencies
-        run: |
-          cd ${{ env.LAMBDA_DIR }}
-          python -m pip install --upgrade pip
-          
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
-          
-          if [ -f requirements-dev.txt ]; then
-            pip install -r requirements-dev.txt
-          else
-            pip install pytest pytest-cov pytest-mock
-          fi
-  
-      - name: Run linting
-        run: |
-          cd ${{ env.LAMBDA_DIR }}
-          pip install flake8
-          
-          # Stop build if there are syntax errors
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=build,tests,venv,.venv
-          
-      - name: Run unit tests with coverage
-        run: |
-          cd ${{ env.LAMBDA_DIR }}
-          pytest tests/ -v \
-            --cov=. \
-            --cov-report=term-missing:skip-covered \
-            --cov-fail-under=80 \
-            --tb=short
+          lambda-dir: ${{ env.LAMBDA_DIR }}
+          coverage-threshold: 80
 
   deploy:
     needs: test
@@ -79,64 +48,22 @@ jobs:
       contents: read
 
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build Lambda package
+        uses: ./.github/actions/python-lambda-build
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          lambda-dir: ${{ env.LAMBDA_DIR }}
+          aws-region: ${{ env.AWS_REGION }}
+          include-rds-cert: 'true'
 
-    - name: Download RDS SSL Certificate
-      run: |
-        cd ${{ env.LAMBDA_DIR }}
-        mkdir -p certs
-        curl -o certs/${{ env.AWS_REGION }}-bundle.pem \
-          https://truststore.pki.rds.amazonaws.com/${{ env.AWS_REGION }}/${{ env.AWS_REGION }}-bundle.pem
-
-    - name: Build Lambda package
-      run: |
-        cd ${{ env.LAMBDA_DIR }}
-        mkdir -p build
-        
-        # Install dependencies
-        if [ -f requirements.txt ]; then
-          pip install -r requirements.txt -t build/ --upgrade
-        fi
-        
-        # Copy Lambda function and ssl ca
-        cp -r *.py build/
-        cp -r certs build/
-
-    - name: Create deployment package
-      run: |
-        cd ${{ env.LAMBDA_DIR }}/build
-        zip -r ../deployment-package.zip . -x "*.pyc" -x "*__pycache__*" -x "*.dist-info/*"
-
-    - name: Cleanup downloaded certificate
-      run: rm -rf ${{ env.LAMBDA_DIR }}/certs/
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_OIDC_ROLE }}
-        role-duration-seconds: 900
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Deploy to AWS Lambda
-      run: |
-        aws lambda update-function-code \
-          --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-          --zip-file fileb://${{ env.LAMBDA_DIR }}/deployment-package.zip \
-          --publish
-
-    - name: Wait for Lambda update
-      run: |
-        aws lambda wait function-updated \
-          --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
-        echo "Consumer Lambda deployment successful!"
-
-    - name: Cleanup build artifacts
-      if: always()
-      run: |
-        rm -rf ${{ env.LAMBDA_DIR }}/build/
-        rm -f ${{ env.LAMBDA_DIR }}/deployment-package.zip
+      - name: Deploy Lambda to AWS
+        uses: ./.github/actions/aws-lambda-deploy
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          aws-account-id: ${{ env.AWS_ACCOUNT_ID }}
+          github-oidc-role: ${{ env.GITHUB_OIDC_ROLE }}
+          lambda-function-name: ${{ env.LAMBDA_FUNCTION_NAME }}
+          lambda-dir: ${{ env.LAMBDA_DIR }}
+          deployment-message: 'Consumer Lambda deployment successful!'

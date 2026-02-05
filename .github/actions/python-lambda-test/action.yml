@@ -1,0 +1,66 @@
+name: 'Python Lambda Test'
+description: 'Run linting and unit tests for Python Lambda functions'
+
+inputs:
+  python-version:
+    description: 'Python version to use'
+    required: true
+    default: '3.11'
+  lambda-dir:
+    description: 'Lambda function directory path'
+    required: true
+  coverage-threshold:
+    description: 'Minimum code coverage percentage'
+    required: false
+    default: '80'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles(format('{0}/requirements*.txt', inputs.lambda-dir)) }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        cd ${{ inputs.lambda-dir }}
+        python -m pip install --upgrade pip
+        
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        fi
+        
+        if [ -f requirements-dev.txt ]; then
+          pip install -r requirements-dev.txt
+        else
+          pip install pytest pytest-cov pytest-mock
+        fi
+
+    - name: Run linting
+      shell: bash
+      run: |
+        cd ${{ inputs.lambda-dir }}
+        pip install flake8
+        
+        # Stop build if there are syntax errors
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=build,tests,venv,.venv
+        
+    - name: Run unit tests with coverage
+      shell: bash
+      run: |
+        cd ${{ inputs.lambda-dir }}
+        pytest tests/ -v \
+          --cov=. \
+          --cov-report=term-missing:skip-covered \
+          --cov-fail-under=${{ inputs.coverage-threshold }} \
+          --tb=short
