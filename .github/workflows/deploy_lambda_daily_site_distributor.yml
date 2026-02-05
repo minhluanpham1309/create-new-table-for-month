@@ -9,60 +9,16 @@ on:
     paths:
       - DailySiteDistributor/**
 
-env:
-  AWS_REGION: ap-northeast-1
-  PYTHON_VERSION: '3.11'
-  AWS_ACCOUNT_ID: 683918607581
-  GITHUB_OIDC_ROLE: HeatmapJapan-GithubAction
-  LAMBDA_FUNCTION_NAME: MonthlyAddingSiteTablesProducer
-  DIRECTORY_NAME: DailySiteDistributor
-
 jobs:
-  test:
-    # Run workflow when:
-    # - PR merged to develop from feature/* branch, OR
-    # - PR merged to main from release/* or hotfix/* branch
-    if: |
-      github.event.pull_request.merged == true && (
-        (github.base_ref == 'develop' && startsWith(github.head_ref, 'feature/')) ||
-        (github.base_ref == 'main' && (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')))
-      )
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Test Lambda
-        uses: ./.github/actions/python-lambda-test
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          lambda-dir: ${{ env.LAMBDA_DIR }}
-          coverage-threshold: 80
-
-  deploy:
-    needs: test
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-
-    steps:
-    - uses: actions/checkout@v3
-
-    - name: Build Lambda package
-      uses: ./.github/actions/python-lambda-build
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        lambda-dir: ${{ env.LAMBDA_DIR }}
-        aws-region: ${{ env.AWS_REGION }}
-        include-rds-cert: 'true'
-
-    - name: Deploy Lambda to AWS
-      uses: ./.github/actions/aws-lambda-deploy
-      with:
-        aws-region: ${{ env.AWS_REGION }}
-        aws-account-id: ${{ env.AWS_ACCOUNT_ID }}
-        github-oidc-role: ${{ env.GITHUB_OIDC_ROLE }}
-        lambda-function-name: ${{ env.LAMBDA_FUNCTION_NAME }}
-        lambda-dir: ${{ env.LAMBDA_DIR }}
-        deployment-message: 'Producer Lambda deployment successful!'
+  deploy-lambda:
+    uses: ./.github/workflows/deploy-lambda-reusable.yml
+    with:
+      lambda-function-name: MonthlyAddingSiteTablesProducer
+      lambda-dir: DailySiteDistributor
+      python-version: '3.11'
+      aws-region: ap-northeast-1
+      aws-account-id: '683918607581'
+      github-oidc-role: HeatmapJapan-GithubAction
+      include-rds-cert: 'true'
+      coverage-threshold: 80
+      deployment-message: 'Producer Lambda deployment successful!'
