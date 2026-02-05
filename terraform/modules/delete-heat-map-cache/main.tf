@@ -1,15 +1,4 @@
-# ============================================================================
-# DELETE HEAT MAP CACHE MODULE
-# ============================================================================
-# This module creates a Lambda function that deletes cache data and schedules
-# it to run periodically using EventBridge Scheduler.
-#
-# Components:
-# - Lambda Function (via lambda-function module)
-# - EventBridge Scheduler (via eventbridge-scheduler module)
-# ============================================================================
-
-# Lambda Function for deleting cache
+# Lambda Function
 module "lambda" {
   source = "../lambda-function"
 
@@ -36,7 +25,6 @@ module "lambda" {
   tags                  = var.tags
 }
 
-# EventBridge Scheduler for periodic cache deletion
 module "schedule" {
   source = "../eventbridge-scheduler"
 
@@ -54,6 +42,5 @@ module "schedule" {
     arn   = module.lambda.function_arn
     input = var.schedule_input
   }
-  
   retry_policy = var.schedule_retry_policy
 }

@@ -1,20 +1,3 @@
-# CloudWatch Log Group
-resource "aws_cloudwatch_log_group" "lambda" {
-  name              = "/aws/lambda/${var.project_name}-${var.function_name}"
-  retention_in_days = var.log_retention_in_days
-
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.project_name}-${var.function_name}-logs"
-    }
-  )
-
-  lifecycle {
-    ignore_changes = [retention_in_days]
-  }
-}
-
 # Create dummy zip file
 data "archive_file" "dummy" {
   type        = "zip"
@@ -126,7 +109,6 @@ resource "aws_lambda_function" "this" {
   )
 
   depends_on = [
-    aws_cloudwatch_log_group.lambda,
     aws_security_group.lambda
   ]
 }
