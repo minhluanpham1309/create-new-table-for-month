@@ -16,10 +16,6 @@ jobs:
     with:
       lambda-function-name: MonthlyAddingSiteTablesConsumer
       lambda-dir: MonthlyAddingSiteTablesConsumer
-      python-version: '3.11'
-      aws-region: ap-northeast-1
       aws-account-id: '683918607581'
       github-oidc-role: HeatmapJapan-GithubAction
-      include-rds-cert: 'true'
-      coverage-threshold: 80
       deployment-message: 'Consumer Lambda deployment successful!'
