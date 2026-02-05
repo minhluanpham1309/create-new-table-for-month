@@ -30,11 +30,6 @@ on:
         required: false
         type: string
         default: 'HeatmapJapan-GithubAction'
-      include-rds-cert:
-        description: 'Whether to include RDS certificate'
-        required: false
-        type: string
-        default: 'true'
       coverage-threshold:
         description: 'Minimum code coverage percentage'
         required: false
@@ -119,7 +114,6 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Download RDS SSL Certificate
-        if: inputs.include-rds-cert == 'true'
         run: |
           cd ${{ inputs.lambda-dir }}
           mkdir -p certs
@@ -131,18 +125,12 @@ jobs:
           cd ${{ inputs.lambda-dir }}
           mkdir -p build
           
-          # Install dependencies if requirements.txt exists
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt -t build/ --upgrade
-          fi
-          
-          # Copy Lambda function
+          # Install dependencies
+          pip install -r requirements.txt -t build/ --upgrade
+         
+          # Copy Lambda function and ssl ca
           cp -r *.py build/
-          
-          # Copy SSL certificate if exists
-          if [ -d certs ]; then
-            cp -r certs build/
-          fi
+          cp -r certs build/
 
       - name: Create deployment package
         run: |
