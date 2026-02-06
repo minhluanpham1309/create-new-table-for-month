@@ -7,13 +7,3 @@ output "function_arn" {
   description = "Lambda function ARN"
   value       = aws_lambda_function.this.arn
 }
-
-output "function_invoke_arn" {
-  description = "Lambda function invoke ARN"
-  value       = aws_lambda_function.this.invoke_arn
-}
-
-output "security_group_id" {
-  description = "Security group ID (if created)"
-  value       = try(aws_security_group.lambda[0].id, null)
-}
