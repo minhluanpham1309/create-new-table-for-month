@@ -207,3 +207,41 @@ module "monthly_adding_site_tables_consumer" {
 
   tags = merge(var.tags, try(var.monthly_adding_site_tables_consumer.tags, {}))
 }
+
+# Delete heat map cache
+module "delete_heat_map_cache" {
+  source = "./modules/delete-heat-map-cache"
+  count  = var.delete_heat_map_cache == null ? 0 : 1
+
+  project_name = var.project_name
+
+  lambda_function_name         = var.delete_heat_map_cache.lambda_function_name
+  lambda_handler               = var.delete_heat_map_cache.lambda_handler
+  lambda_runtime               = var.delete_heat_map_cache.lambda_runtime
+  lambda_timeout               = var.delete_heat_map_cache.lambda_timeout
+  lambda_memory_size           = var.delete_heat_map_cache.lambda_memory_size
+  lambda_architectures         = var.delete_heat_map_cache.lambda_architectures
+  lambda_environment_variables = var.delete_heat_map_cache.lambda_environment_variables
+  lambda_log_retention_in_days = var.delete_heat_map_cache.lambda_log_retention_in_days
+
+  lambda_role_arn = module.shared_lambda_role.role_arn
+
+  # VPC
+  vpc_config            = try(var.delete_heat_map_cache.vpc_config, null)
+  create_security_group = var.delete_heat_map_cache.create_security_group
+  rds_security_group_id = var.delete_heat_map_cache.rds_security_group_id
+  smg_end_point_sg_id   = var.delete_heat_map_cache.smg_end_point_sg_id
+
+  # EventBridge Scheduler
+  schedule_name                = var.delete_heat_map_cache.schedule_name
+  schedule_description         = var.delete_heat_map_cache.schedule_description
+  schedule_expression          = var.delete_heat_map_cache.schedule_expression
+  schedule_expression_timezone = var.delete_heat_map_cache.schedule_expression_timezone
+  schedule_enabled             = var.delete_heat_map_cache.schedule_enabled
+  schedule_input               = var.delete_heat_map_cache.schedule_input
+
+  scheduler_role_arn    = module.shared_scheduler_role.role_arn
+  schedule_retry_policy = var.delete_heat_map_cache.schedule_retry_policy
+
+  tags = merge(var.tags, try(var.delete_heat_map_cache.tags, {}))
+}

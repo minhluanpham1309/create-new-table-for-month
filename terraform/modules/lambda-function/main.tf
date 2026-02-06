@@ -1,18 +1,14 @@
 # CloudWatch Log Group
 resource "aws_cloudwatch_log_group" "lambda" {
-  name              = "/aws/lambda/${var.project_name}-${var.function_name}"
+  name              = "/aws/lambda/${var.function_name}"
   retention_in_days = var.log_retention_in_days
 
   tags = merge(
     var.tags,
     {
-      Name = "${var.project_name}-${var.function_name}-logs"
+      Name = "${var.function_name}-logs"
     }
   )
-
-  lifecycle {
-    ignore_changes = [retention_in_days]
-  }
 }
 
 # Create dummy zip file

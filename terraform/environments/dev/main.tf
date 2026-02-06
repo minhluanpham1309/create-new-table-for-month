@@ -10,6 +10,9 @@ variable "sns_topic_monthly_adding_site_tables_notifications" {
 variable "sfn_name_monthly_adding_site_tables_consumer" {
   default = "monthly-adding-site-tables-consumer"
 }
+variable "lambda_function_name_delete_heat_map_cache" {
+  default = "DeleteHeatMapCache"
+}
 
 # Locals for reusable resources (ARNs)
 locals {
@@ -131,6 +134,7 @@ module "heatmap_japan_dev" {
     }
     
     lambda_inline_policies = local.lambda_policies
+    lambda_log_retention_in_days = 90
 
     # VPC config
     create_security_group = true
@@ -168,6 +172,7 @@ module "heatmap_japan_dev" {
     }
 
     lambda_inline_policies = local.lambda_policies
+    lambda_log_retention_in_days = 90
 
     # VPC config
     create_security_group = true
@@ -199,6 +204,46 @@ module "heatmap_japan_dev" {
       "execute-state-machine" = local.eventbridge_scheduler_policies["execute-state-machine"]
     }
     
+    schedule_retry_policy = {
+      maximum_event_age_in_seconds = 900
+      maximum_retry_attempts       = 3
+    }
+  }
+  
+  # Lambda functions configuration (if needed)
+  delete_heat_map_cache = {
+    # Lambda function configuration
+    lambda_function_name = var.lambda_function_name_delete_heat_map_cache
+
+    lambda_environment_variables = {
+      SITE_CHUNK_DAYS = 21
+      RDS_SECRET_NAME = "rds/db-test-private"
+    }
+    
+    lambda_inline_policies = local.lambda_policies
+    lambda_log_retention_in_days = 90
+
+    # VPC config
+    create_security_group = true
+    vpc_config = {
+      vpc_id             = "vpc-08586cd9f6ce3a905"
+      subnet_ids         = ["subnet-0ffa21d23c30bbf14", "subnet-09e78cbbf83798d9a", "subnet-0071f6115ba604b19"]
+      security_group_ids = []
+    }
+
+    # RDS Security Group
+    rds_security_group_id = "sg-0ec24edb38ce58304"
+
+    # Secrets Manager End Point Security Group
+    smg_end_point_sg_id = "sg-00ca8426775d6c9b3"
+
+    # Scheduler configuration
+    schedule_name = "delete-heat-map-cache-schedule"
+    schedule_expression = "cron(0 0 1 * ? *)"
+    scheduler_inline_policies = {
+      "invoke-lambda" = local.eventbridge_scheduler_policies["invoke-lambda"]
+    }
+
     schedule_retry_policy = {
       maximum_event_age_in_seconds = 900
       maximum_retry_attempts       = 3
