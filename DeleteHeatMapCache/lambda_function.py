@@ -147,7 +147,7 @@ def get_db_connection(secret):
 
 
 def get_secret(region):
-    secret_name = os.environ.get("RDS_SECRET_NAME", "rds/heatmap-db-secret")
+    secret_name = os.environ.get("RDS_SECRET_NAME", "rds/db-test-private")
 
     config = boto3.session.Config(
         connect_timeout=5,
