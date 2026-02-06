@@ -1,0 +1,160 @@
+name: Deploy Python Lambda Function (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      lambda-function-name:
+        description: 'Name of the Lambda function to deploy'
+        required: true
+        type: string
+      lambda-dir:
+        description: 'Directory containing the Lambda function code'
+        required: true
+        type: string
+      python-version:
+        description: 'Python version to use'
+        required: false
+        type: string
+        default: '3.11'
+      aws-region:
+        description: 'AWS region for deployment'
+        required: false
+        type: string
+        default: 'ap-northeast-1'
+      aws-account-id:
+        description: 'AWS account ID'
+        required: true
+        type: string
+      github-oidc-role:
+        description: 'GitHub OIDC role name'
+        required: false
+        type: string
+        default: 'HeatmapJapan-GithubAction'
+      coverage-threshold:
+        description: 'Minimum code coverage percentage'
+        required: false
+        type: number
+        default: 80
+      deployment-message:
+        description: 'Success message to display after deployment'
+        required: false
+        type: string
+        default: 'Lambda deployment successful!'
+
+jobs:
+  test:
+    if: |
+      github.event.pull_request.merged == true && (
+        (github.base_ref == 'develop' && startsWith(github.head_ref, 'feature/')) ||
+        (github.base_ref == 'main' && (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')))
+      )
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles(format('{0}/requirements*.txt', inputs.lambda-dir)) }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          cd ${{ inputs.lambda-dir }}
+          python -m pip install --upgrade pip
+          
+          pip install -r requirements.txt
+          pip install -r requirements-test.txt
+
+      - name: Run linting
+        run: |
+          cd ${{ inputs.lambda-dir }}
+          
+          # Stop build if there are syntax errors
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=build,tests,venv,.venv
+          
+      - name: Run unit tests with coverage
+        run: |
+          cd ${{ inputs.lambda-dir }}
+          pytest tests/ -v \
+            --cov=. \
+            --cov-report=term-missing:skip-covered \
+            --cov-fail-under=${{ inputs.coverage-threshold }} \
+            --tb=short
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Download RDS SSL Certificate
+        run: |
+          cd ${{ inputs.lambda-dir }}
+          mkdir -p certs
+          curl -o certs/${{ inputs.aws-region }}-bundle.pem \
+            https://truststore.pki.rds.amazonaws.com/${{ inputs.aws-region }}/${{ inputs.aws-region }}-bundle.pem
+
+      - name: Build Lambda package
+        run: |
+          cd ${{ inputs.lambda-dir }}
+          mkdir -p build
+          
+          # Install dependencies
+          pip install -r requirements.txt -t build/ --upgrade
+         
+          # Copy Lambda function and ssl ca
+          cp -r *.py build/
+          cp -r certs build/
+
+      - name: Create deployment package
+        run: |
+          cd ${{ inputs.lambda-dir }}/build
+          zip -r ../deployment-package.zip . -x "*.pyc" -x "*__pycache__*" -x "*.dist-info/*"
+
+      - name: Cleanup downloaded certificate
+        if: inputs.include-rds-cert == 'true'
+        run: rm -rf ${{ inputs.lambda-dir }}/certs/
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::${{ inputs.aws-account-id }}:role/${{ inputs.github-oidc-role }}
+          role-duration-seconds: 900
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Deploy to AWS Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ inputs.lambda-function-name }} \
+            --zip-file fileb://${{ inputs.lambda-dir }}/deployment-package.zip \
+            --publish
+
+      - name: Wait for Lambda update
+        run: |
+          aws lambda wait function-updated \
+            --function-name ${{ inputs.lambda-function-name }}
+          echo "${{ inputs.deployment-message }}"
+
+      - name: Cleanup build artifacts
+        if: always()
+        run: |
+          rm -rf ${{ inputs.lambda-dir }}/build/
+          rm -f ${{ inputs.lambda-dir }}/deployment-package.zip
