@@ -8,14 +8,14 @@ on:
     types:
       - closed
     paths:
-      - 'DeleteHeatMapCache/Lambda/**'
+      - 'DeleteHeatMapCache/**'
 
 jobs:
   deploy-lambda:
     uses: ./.github/workflows/deploy-lambda-reusable.yml
     with:
       lambda-function-name: DeleteHeatMapCache
-      lambda-dir: HeatmapJapanCronServerless/DeleteHeatMapCache/Lambda
+      lambda-dir: DeleteHeatMapCache
       aws-account-id: '683918607581'
       github-oidc-role: HeatmapJapan-GithubAction
       deployment-message: 'Delete Cache Lambda deployment successful!'
