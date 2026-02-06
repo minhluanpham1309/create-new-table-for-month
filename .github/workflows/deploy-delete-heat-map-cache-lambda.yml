@@ -1,0 +1,21 @@
+name: Deploy Delete Heat Map Cache Lambda
+
+on:
+  pull_request:
+    branches:
+      - 'develop'
+      - 'main'
+    types:
+      - closed
+    paths:
+      - 'DeleteHeatMapCache/Lambda/**'
+
+jobs:
+  deploy-lambda:
+    uses: ./.github/workflows/deploy-lambda-reusable.yml
+    with:
+      lambda-function-name: DeleteHeatMapCache
+      lambda-dir: HeatmapJapanCronServerless/DeleteHeatMapCache/Lambda
+      aws-account-id: '683918607581'
+      github-oidc-role: HeatmapJapan-GithubAction
+      deployment-message: 'Delete Cache Lambda deployment successful!'

@@ -11,7 +11,7 @@ variable "sfn_name_monthly_adding_site_tables_consumer" {
   default = "monthly-adding-site-tables-consumer"
 }
 variable "lambda_function_name_delete_heat_map_cache" {
-  default = "delete-heat-map-cache"
+  default = "DeleteHeatMapCache"
 }
 
 # Locals for reusable resources (ARNs)
@@ -134,6 +134,7 @@ module "heatmap_japan_dev" {
     }
     
     lambda_inline_policies = local.lambda_policies
+    lambda_log_retention_in_days = 90
 
     # VPC config
     create_security_group = true
@@ -171,6 +172,7 @@ module "heatmap_japan_dev" {
     }
 
     lambda_inline_policies = local.lambda_policies
+    lambda_log_retention_in_days = 90
 
     # VPC config
     create_security_group = true
@@ -219,6 +221,7 @@ module "heatmap_japan_dev" {
     }
     
     lambda_inline_policies = local.lambda_policies
+    lambda_log_retention_in_days = 90
 
     # VPC config
     create_security_group = true
