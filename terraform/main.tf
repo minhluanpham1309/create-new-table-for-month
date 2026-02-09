@@ -39,7 +39,8 @@ module "shared_lambda_role" {
 
   inline_policies = merge(
     try(var.monthly_adding_site_tables_producers.lambda_inline_policies, {}),
-    try(var.monthly_adding_site_tables_consumer.lambda_inline_policies, {})
+    try(var.monthly_adding_site_tables_consumer.lambda_inline_policies, {}), 
+    try(var.delete_heat_map_cache.lambda_inline_policies, {})
   )
   
   managed_policy_arns = ["arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"]
@@ -84,7 +85,8 @@ module "shared_scheduler_role" {
 
   inline_policies = merge(
     try(var.monthly_adding_site_tables_producers.scheduler_inline_policies, {}),
-    try(var.monthly_adding_site_tables_consumer.scheduler_inline_policies, {})
+    try(var.monthly_adding_site_tables_consumer.scheduler_inline_policies, {}),
+    try(var.delete_heat_map_cache.scheduler_inline_policies, {})
   )
 
   tags = var.tags
