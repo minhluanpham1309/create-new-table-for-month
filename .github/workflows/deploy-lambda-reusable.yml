@@ -40,6 +40,11 @@ on:
         required: false
         type: string
         default: 'Lambda deployment successful!'
+      alias-name:
+        description: 'Lambda alias name to update after deployment'
+        required: false
+        type: string
+        default: 'live'
 
 jobs:
   test:
@@ -143,7 +148,6 @@ jobs:
           echo "version=$version" >> $GITHUB_OUTPUT
       
       - name: Update Lambda Alias
-        if: inputs.alias-name != ''
         run: |
           echo "Updating alias '${{ inputs.alias-name }}' to version ${{ steps.deploy.outputs.version }}"
           aws lambda update-alias \
