@@ -22,7 +22,7 @@ on:
         type: string
         default: 'ap-northeast-1'
       aws-account-id:
-        description: 'AWS account ID'
+        description: 'AWS account ID for deployment'
         required: true
         type: string
       github-oidc-role:
@@ -58,14 +58,6 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
-      - name: Cache pip dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles(format('{0}/requirements*.txt', inputs.lambda-dir)) }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
       - name: Install dependencies
         run: |
           cd ${{ inputs.lambda-dir }}
@@ -84,6 +76,8 @@ jobs:
       - name: Run unit tests with coverage
         run: |
           cd ${{ inputs.lambda-dir }}
+          
+          # Run tests and generate coverage report, If coverage is below threshold, fail the job
           pytest tests/ -v \
             --cov=. \
             --cov-report=term-missing:skip-covered \
@@ -129,10 +123,6 @@ jobs:
           cd ${{ inputs.lambda-dir }}/build
           zip -r ../deployment-package.zip . -x "*.pyc" -x "*__pycache__*" -x "*.dist-info/*"
 
-      - name: Cleanup downloaded certificate
-        if: inputs.include-rds-cert == 'true'
-        run: rm -rf ${{ inputs.lambda-dir }}/certs/
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
@@ -141,20 +131,22 @@ jobs:
           aws-region: ${{ inputs.aws-region }}
 
       - name: Deploy to AWS Lambda
+        id: deploy
         run: |
-          aws lambda update-function-code \
+          update_output=$(aws lambda update-function-code \
             --function-name ${{ inputs.lambda-function-name }} \
             --zip-file fileb://${{ inputs.lambda-dir }}/deployment-package.zip \
-            --publish
-
-      - name: Wait for Lambda update
+            --publish)
+          
+          version=$(echo "$update_output" | jq -r '.Version')
+          echo "Published version: $version"
+          echo "version=$version" >> $GITHUB_OUTPUT
+      
+      - name: Update Lambda Alias
+        if: inputs.alias-name != ''
         run: |
-          aws lambda wait function-updated \
-            --function-name ${{ inputs.lambda-function-name }}
-          echo "${{ inputs.deployment-message }}"
-
-      - name: Cleanup build artifacts
-        if: always()
-        run: |
-          rm -rf ${{ inputs.lambda-dir }}/build/
-          rm -f ${{ inputs.lambda-dir }}/deployment-package.zip
+          echo "Updating alias '${{ inputs.alias-name }}' to version ${{ steps.deploy.outputs.version }}"
+          aws lambda update-alias \
+            --function-name ${{ inputs.lambda-function-name }} \
+            --name ${{ inputs.alias-name }} \
+            --function-version ${{ steps.deploy.outputs.version }}
