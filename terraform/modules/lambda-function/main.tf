@@ -83,6 +83,9 @@ resource "aws_lambda_function" "this" {
   timeout       = var.timeout
   memory_size   = var.memory_size
   architectures = var.architectures
+  
+  # Ensure publish is false - we don't want Terraform creating versions
+  publish = false
 
   dynamic "environment" {
     for_each = var.environment_variables != null ? [1] : []
@@ -125,4 +128,16 @@ resource "aws_lambda_function" "this" {
     aws_cloudwatch_log_group.lambda,
     aws_security_group.lambda
   ]
+}
+
+# Lambda Alias
+resource "aws_lambda_alias" "this" {
+  name             = "live"
+  description      = "Alias for ${var.function_name}"
+  function_name    = aws_lambda_function.this.function_name
+  function_version = "$LATEST"
+
+  lifecycle {
+    ignore_changes = all
+  }
 }

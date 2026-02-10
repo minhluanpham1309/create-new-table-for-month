@@ -23,9 +23,9 @@ locals {
 
   # Resource ARNs
   rds_secret_arn              = "arn:aws:secretsmanager:${local.aws_shorthand}:secret:rds/db-test-private*"
-  producer_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_producer}*"
-  consumer_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_consumer}*"
-  delete_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_delete_heat_map_cache}*"
+  producer_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_producer}:live"
+  consumer_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_consumer}:live"
+  delete_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_delete_heat_map_cache}:live"
   sns_topic_arn               = "arn:aws:sns:${local.aws_shorthand}:${var.sns_topic_monthly_adding_site_tables_notifications}"
   step_functions_state_machine_arn = "arn:aws:states:${local.aws_shorthand}:stateMachine:${var.sfn_name_monthly_adding_site_tables_consumer}"
 
