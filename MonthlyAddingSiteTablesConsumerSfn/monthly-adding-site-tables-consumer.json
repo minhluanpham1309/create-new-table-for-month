@@ -6,7 +6,7 @@
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke",
       "Parameters": {
-        "FunctionName": "MonthlyAddingSiteTablesConsumer",
+        "FunctionName": "MonthlyAddingSiteTablesConsumer:live",
         "Payload.$": "$"
       },
       "Retry": [
@@ -61,7 +61,7 @@
               "Type": "Task",
               "Resource": "arn:aws:states:::sns:publish",
               "Parameters": {
-                "TopicArn": "arn:aws:sns:ap-northeast-1:{account_id}:monthly-adding-site-tables-notifications:live",
+                "TopicArn": "arn:aws:sns:ap-northeast-1:{account_id}:monthly-adding-site-tables-notifications",
                 "Subject": "[Heat Map] Automatic create new table for storage",
                 "Message.$": "States.Format('Dear Administrator,\n\nI want notification for you good news!\n\nSystem just created new tables for monthly storage successfully.\n\nTotal count: {}\nSuccess count: {}\n\nBe careful please check again!\n\nThank you so much!\n\nMieruca Heatmap Machine', $.parsedResponse.body.result.total_sites, $.parsedResponse.body.result.total_sites_success)"
               },
