@@ -18,7 +18,7 @@ resource "aws_scheduler_schedule" "this" {
   state                        = var.enabled ? "ENABLED" : "DISABLED"
 
   target {
-    arn      = var.target.arn
+    arn      = var.target.alias != null ? "${var.target.arn}:${var.target.alias}" : var.target.arn
     role_arn = var.scheduler_role_arn
     input    = var.target.input != null ? jsonencode(var.target.input) : null
 
