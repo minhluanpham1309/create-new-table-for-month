@@ -1,11 +1,11 @@
 output "valkey_endpoint" {
   description = "Valkey cluster endpoint"
-  value       = module.valkey.endpoint
+  value       = var.enable_valkey ? module.valkey[0].endpoint : null
 }
 
 output "valkey_port" {
   description = "Valkey port"
-  value       = module.valkey.port
+  value       = var.enable_valkey ? module.valkey[0].port : null
 }
 
 # Monthly Adding Site Tables Producer outputs

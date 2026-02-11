@@ -1,19 +1,3 @@
-variable "lambda_function_name_producer" {
-  default = "MonthlyAddingSiteTablesProducer"
-}
-variable "lambda_function_name_consumer" {
-  default = "MonthlyAddingSiteTablesConsumer"
-}
-variable "sns_topic_monthly_adding_site_tables_notifications" {
-  default = "monthly-adding-site-tables-notifications"
-}
-variable "sfn_name_monthly_adding_site_tables_consumer" {
-  default = "monthly-adding-site-tables-consumer"
-}
-variable "lambda_function_name_delete_heat_map_cache" {
-  default = "DeleteHeatMapCache"
-}
-
 # Locals for reusable resources (ARNs)
 locals {
   # AWS Configuration
@@ -23,9 +7,9 @@ locals {
 
   # Resource ARNs
   rds_secret_arn              = "arn:aws:secretsmanager:${local.aws_shorthand}:secret:rds/db-test-private*"
-  producer_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_producer}:live"
-  consumer_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_consumer}:live"
-  delete_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_delete_heat_map_cache}:live"
+  producer_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_producer}:${var.lambda_alias}"
+  consumer_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_consumer}:${var.lambda_alias}"
+  delete_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_delete_heat_map_cache}:${var.lambda_alias}"
   sns_topic_arn               = "arn:aws:sns:${local.aws_shorthand}:${var.sns_topic_monthly_adding_site_tables_notifications}"
   step_functions_state_machine_arn = "arn:aws:states:${local.aws_shorthand}:stateMachine:${var.sfn_name_monthly_adding_site_tables_consumer}"
 
@@ -110,6 +94,10 @@ module "heatmap_japan_dev" {
   vpc_id                     = "vpc-08586cd9f6ce3a905"
   subnet_ids                 = ["subnet-0ffa21d23c30bbf14", "subnet-09e78cbbf83798d9a", "subnet-0071f6115ba604b19"]
   allowed_security_group_ids = ["sg-01bac204cde449aee", "sg-06addf3041186f839", "sg-03b92aa686c2d348d"]
+  
+  # Valkey - Disable Terraform management (managed manually on AWS)
+  enable_valkey = false
+  
   # Valkey configuration for dev - single node for cost savings
   valkey_node_type                  = "cache.t4g.micro" # Smallest ARM-based instance
   valkey_num_cache_nodes            = 1                 # Single node to save cost
@@ -136,6 +124,7 @@ module "heatmap_japan_dev" {
     
     lambda_inline_policies = local.lambda_policies
     lambda_log_retention_in_days = 90
+    lambda_alias = var.lambda_alias
 
     # VPC config
     create_security_group = true
@@ -223,6 +212,7 @@ module "heatmap_japan_dev" {
     
     lambda_inline_policies = local.lambda_policies
     lambda_log_retention_in_days = 90
+    lambda_alias = var.lambda_alias
 
     # VPC config
     create_security_group = true
