@@ -98,6 +98,12 @@ variable "schedule_input" {
   type        = any
 }
 
+variable "schedule_alias" {
+  description = "Lambda alias name for the schedule target (e.g., 'live', 'prod')"
+  type        = string
+  default     = null
+}
+
 variable "scheduler_role_arn" {
   description = "IAM role ARN for EventBridge Scheduler"
   type        = string
