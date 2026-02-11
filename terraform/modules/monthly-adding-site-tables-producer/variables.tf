@@ -120,3 +120,9 @@ variable "smg_end_point_sg_id" {
   description = "Secret manager end point to allow Lambda access. If provided, will create ingress rule."
   type        = string
 }
+
+variable "lambda_alias" {
+  description = "Lambda alias name for the schedule target (e.g., 'live', 'prod')"
+  type        = string
+  default     = null
+}

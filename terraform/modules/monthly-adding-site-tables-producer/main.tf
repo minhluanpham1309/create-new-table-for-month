@@ -41,6 +41,7 @@ module "schedule" {
     type  = "lambda"
     arn   = module.lambda.function_arn
     input = var.schedule_input
+    alias = var.lambda_alias
   }
   retry_policy = var.schedule_retry_policy
 }
