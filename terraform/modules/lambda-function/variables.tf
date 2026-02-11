@@ -92,3 +92,9 @@ variable "smg_end_point_sg_id" {
   description = "Secret Manager Security Group ID to allow Lambda access to Secret Manager (if applicable)"
   type        = string
 }
+
+variable "lambda_alias" {
+    description = "Lambda alias name for the schedule target (e.g., 'live', 'prod')"
+    type        = string
+    default     = "live"
+}

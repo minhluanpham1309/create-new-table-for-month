@@ -38,6 +38,12 @@ variable "tags" {
 }
 
 # Valkey variables
+variable "enable_valkey" {
+  description = "Whether to create and manage Valkey resources with Terraform"
+  type        = bool
+  default     = false
+}
+
 variable "valkey_node_type" {
   description = "The instance class for Valkey nodes"
   type        = string
@@ -160,6 +166,7 @@ variable "monthly_adding_site_tables_producers" {
     schedule_expression_timezone = optional(string, "Asia/Tokyo")
     schedule_enabled             = optional(bool, true)
     schedule_input               = optional(any, {})
+    lambda_alias                 = optional(string, null)
 
     # Scheduler IAM Role (Auto-create if null)
     scheduler_inline_policies = optional(map(string), {})
@@ -247,6 +254,7 @@ variable "delete_heat_map_cache" {
     lambda_architectures         = optional(list(string), ["x86_64"])
     lambda_environment_variables = optional(map(string), {})
     lambda_log_retention_in_days = optional(number, 7)
+    lambda_alias                 = optional(string, null)
 
     # Lambda IAM Role (Auto-create if null)
     lambda_inline_policies = optional(map(string), {})

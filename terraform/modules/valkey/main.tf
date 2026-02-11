@@ -8,6 +8,10 @@ resource "aws_elasticache_subnet_group" "valkey" {
       Name = "${var.project_name}-valkey-subnet-group"
     }
   )
+  
+  lifecycle {
+    ignore_changes = all
+  }
 }
 
 resource "aws_security_group" "valkey" {
@@ -40,6 +44,7 @@ resource "aws_security_group" "valkey" {
 
   lifecycle {
     create_before_destroy = true
+    ignore_changes        = all
   }
 }
 

@@ -96,6 +96,7 @@ module "shared_scheduler_role" {
 
 # Valkey Module
 module "valkey" {
+  count  = var.enable_valkey ? 1 : 0
   source = "./modules/valkey"
 
   project_name               = var.project_name
@@ -142,6 +143,7 @@ module "monthly_adding_site_tables_producer" {
   lambda_architectures         = var.monthly_adding_site_tables_producers.lambda_architectures
   lambda_environment_variables = var.monthly_adding_site_tables_producers.lambda_environment_variables
   lambda_log_retention_in_days = var.monthly_adding_site_tables_producers.lambda_log_retention_in_days
+  lambda_alias                 = var.delete_heat_map_cache.lambda_alias
 
   lambda_role_arn = module.shared_lambda_role.role_arn
 
@@ -227,6 +229,7 @@ module "delete_heat_map_cache" {
   lambda_architectures         = var.delete_heat_map_cache.lambda_architectures
   lambda_environment_variables = var.delete_heat_map_cache.lambda_environment_variables
   lambda_log_retention_in_days = var.delete_heat_map_cache.lambda_log_retention_in_days
+  lambda_alias                 = var.delete_heat_map_cache.lambda_alias
 
   lambda_role_arn = module.shared_lambda_role.role_arn
 

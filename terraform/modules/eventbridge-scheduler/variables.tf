@@ -69,7 +69,7 @@ variable "target" {
     type  = string # "lambda" | "step_functions" | "sns"
     arn   = string
     input = optional(any)
-    alias = optional(string, "live") # Lambda alias name (e.g., "live", "prod")
+    alias = optional(string, null) # Lambda alias name (e.g., "live", "prod")
   })
 
   default = null
