@@ -10,6 +10,7 @@ locals {
   producer_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_producer}:${var.lambda_alias}"
   consumer_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_consumer}:${var.lambda_alias}"
   delete_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_delete_heat_map_cache}:${var.lambda_alias}"
+  delete_old_data_lambda_arn  = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_delete_old_data_heat_map}:${var.lambda_alias}"
   sns_topic_arn               = "arn:aws:sns:${local.aws_shorthand}:${var.sns_topic_monthly_adding_site_tables_notifications}"
   step_functions_state_machine_arn = "arn:aws:states:${local.aws_shorthand}:stateMachine:${var.sfn_name_monthly_adding_site_tables_consumer}"
 
@@ -40,7 +41,7 @@ locals {
         Sid      = "InvokeLambdaFunction"
         Effect   = "Allow"
         Action   = ["lambda:InvokeFunction"]
-        Resource = [local.producer_lambda_arn , local.delete_lambda_arn]
+        Resource = [local.producer_lambda_arn , local.delete_lambda_arn, local.delete_old_data_lambda_arn]
       }]
     })
     
@@ -230,6 +231,46 @@ module "heatmap_japan_dev" {
 
     # Scheduler configuration
     schedule_name = "delete-heat-map-cache-schedule"
+    schedule_expression = "cron(0 0 1 * ? *)"
+    scheduler_inline_policies = {
+      "invoke-lambda" = local.eventbridge_scheduler_policies["invoke-lambda"]
+    }
+
+    schedule_retry_policy = {
+      maximum_event_age_in_seconds = 900
+      maximum_retry_attempts       = 3
+    }
+  }
+  
+  # Lambda functions configuration (if needed)
+  delete_old_data_heat_map = {
+    # Lambda function configuration
+    lambda_function_name = var.lambda_function_name_delete_old_data_heat_map
+
+    lambda_environment_variables = {
+      RDS_SECRET_NAME = "rds/db-test-private"
+    }
+    
+    lambda_inline_policies = local.lambda_policies
+    lambda_log_retention_in_days = 90
+    lambda_alias = var.lambda_alias
+
+    # VPC config
+    create_security_group = true
+    vpc_config = {
+      vpc_id             = "vpc-08586cd9f6ce3a905"
+      subnet_ids         = ["subnet-0ffa21d23c30bbf14", "subnet-09e78cbbf83798d9a", "subnet-0071f6115ba604b19"]
+      security_group_ids = []
+    }
+
+    # RDS Security Group
+    rds_security_group_id = "sg-0ec24edb38ce58304"
+
+    # Secrets Manager End Point Security Group
+    smg_end_point_sg_id = "sg-00ca8426775d6c9b3"
+
+    # Scheduler configuration
+    schedule_name = "delete-old-data-heat-map-schedule"
     schedule_expression = "cron(0 0 1 * ? *)"
     scheduler_inline_policies = {
       "invoke-lambda" = local.eventbridge_scheduler_policies["invoke-lambda"]

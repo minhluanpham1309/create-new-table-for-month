@@ -292,3 +292,55 @@ variable "delete_heat_map_cache" {
   nullable = true
   default  = null
 }
+
+# Delete old data heat map (Lambda + EventBridge Scheduler)
+variable "delete_old_data_heat_map" {
+  description = "Configuration for delete_old_data_heat_map"
+  type = object({
+    # Lambda
+    lambda_function_name         = string
+    lambda_handler               = optional(string, "lambda_function.lambda_handler")
+    lambda_runtime               = optional(string, "python3.11")
+    lambda_timeout               = optional(number, 900)
+    lambda_memory_size           = optional(number, 256)
+    lambda_architectures         = optional(list(string), ["x86_64"])
+    lambda_environment_variables = optional(map(string), {})
+    lambda_log_retention_in_days = optional(number, 7)
+    lambda_alias                 = optional(string, null)
+
+    # Lambda IAM Role (Auto-create if null)
+    lambda_inline_policies = optional(map(string), {})
+
+    # VPC Configuration
+    vpc_config = optional(object({
+      vpc_id             = string
+      subnet_ids         = list(string)
+      security_group_ids = list(string)
+    }))
+    create_security_group = optional(bool, false)
+    rds_security_group_id = optional(string, null)
+    smg_end_point_sg_id   = optional(string, null)
+
+    # EventBridge Scheduler
+    schedule_name                = string
+    schedule_description         = optional(string, "Trigger delete_old_data_heat_map on a schedule")
+    schedule_expression          = optional(string, "cron(0 0 1 * ? *)")
+    schedule_expression_timezone = optional(string, "Asia/Tokyo")
+    schedule_enabled             = optional(bool, true)
+    schedule_input               = optional(any, {})
+
+    # Scheduler IAM Role (Auto-create if null)
+    scheduler_inline_policies = optional(map(string), {})
+
+    schedule_retry_policy = object({
+      maximum_event_age_in_seconds = number
+      maximum_retry_attempts       = number
+    })
+
+    # Tags
+    tags = optional(map(string), {})
+  })
+
+  nullable = true
+  default  = null
+}
