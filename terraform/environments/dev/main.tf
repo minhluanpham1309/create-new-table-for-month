@@ -1,6 +1,3 @@
-variable "lambda_function_name_delete_old_data_heat_map" {
-  default = "DeleteOldDataHeatMap"
-}
 # Locals for reusable resources (ARNs)
 locals {
   # AWS Configuration

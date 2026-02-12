@@ -18,6 +18,10 @@ variable "lambda_function_name_delete_heat_map_cache" {
   default = "DeleteHeatMapCache"
 }
 
+variable "lambda_function_name_delete_old_data_heat_map" {
+  default = "DeleteOldDataHeatMap"
+}
+
 variable "lambda_alias" {
   default = "live"
 }

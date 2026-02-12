@@ -306,6 +306,7 @@ variable "delete_old_data_heat_map" {
     lambda_architectures         = optional(list(string), ["x86_64"])
     lambda_environment_variables = optional(map(string), {})
     lambda_log_retention_in_days = optional(number, 7)
+    lambda_alias                 = optional(string, null)
 
     # Lambda IAM Role (Auto-create if null)
     lambda_inline_policies = optional(map(string), {})

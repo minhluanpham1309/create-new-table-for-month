@@ -268,6 +268,7 @@ module "delete_old_data_heat_map" {
   lambda_architectures         = var.delete_old_data_heat_map.lambda_architectures
   lambda_environment_variables = var.delete_old_data_heat_map.lambda_environment_variables
   lambda_log_retention_in_days = var.delete_old_data_heat_map.lambda_log_retention_in_days
+  lambda_alias                 = var.delete_old_data_heat_map.lambda_alias
 
   lambda_role_arn = module.shared_lambda_role.role_arn
 
