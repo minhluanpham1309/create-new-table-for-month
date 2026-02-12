@@ -16,14 +16,14 @@ if not os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
     load_dotenv()
 
 # Configure logging
-# logger = logging.getLogger()
-# logger.setLevel(logging.INFO)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+# )
+# logger = logging.getLogger(__name__)
 
 jst = pytz.timezone('Asia/Tokyo')
 current_date = datetime.now(jst)
@@ -112,18 +112,6 @@ def get_db_connection(secret):
             "cursorclass": pymysql.cursors.DictCursor,
             "ssl": ssl_context,
         }
-        
-        # db_config = {
-        #     'host': os.getenv('DB_HOST'),
-        #     'port': int(os.getenv('DB_PORT', 3306)),
-        #     'user': os.getenv('DB_USER'),
-        #     'password': os.getenv('DB_PASSWORD'),
-        #     'database': os.getenv('DB_NAME', "HEAT_MAP"),
-        #     'charset': 'utf8mb4',
-        #     'connect_timeout': 10,
-        #     'cursorclass': pymysql.cursors.DictCursor,
-        #     'ssl': ssl_context
-        # }
 
         logger.info("Connecting to database...")
         connection = pymysql.connect(**db_config)

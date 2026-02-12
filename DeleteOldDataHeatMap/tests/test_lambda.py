@@ -140,8 +140,8 @@ class TestLambdaHandler:
     @patch('lambda_function.get_region')
     @patch('lambda_function.get_secret')
     @patch('lambda_function.get_db_connection')
-    @patch('lambda_function.auto_delete_old_data_heatmap')
-    def test_lambda_handler_success(self, mock_auto_delete, mock_db, mock_secret, mock_region):
+    @patch('lambda_function.auto_update_date_min_heatmap_site')
+    def test_lambda_handler_success(self, mock_auto_update, mock_db, mock_secret, mock_region):
         """Test successful lambda execution"""
         # Setup mocks
         mock_region.return_value = 'ap-northeast-1'
@@ -161,8 +161,8 @@ class TestLambdaHandler:
     @patch('lambda_function.get_region')
     @patch('lambda_function.get_secret')
     @patch('lambda_function.get_db_connection')
-    @patch('lambda_function.auto_delete_old_data_heatmap')
-    def test_lambda_handler_error_rollback(self, mock_auto_delete, mock_db, 
+    @patch('lambda_function.auto_update_date_min_heatmap_site')
+    def test_lambda_handler_error_rollback(self, mock_auto_update, mock_db, 
                                            mock_secret, mock_region):
         """Test lambda handler rolls back on error"""
         mock_region.return_value = 'ap-northeast-1'
@@ -171,7 +171,7 @@ class TestLambdaHandler:
         mock_db.return_value = mock_conn
         
         # Simulate error
-        mock_auto_delete.side_effect = Exception("Processing error")
+        mock_auto_update.side_effect = Exception("Processing error")
         
         with pytest.raises(Exception):
             lambda_function.lambda_handler()
@@ -455,18 +455,139 @@ class TestCalculateRetentionDates:
             
             assert result_30['new_date_min'].day == 1
             assert result_90['new_date_min'].day == 1
+    
+    def test_edge_case_month_end_31(self):
+        """Test calculation from months with 31 days"""
+        jst = pytz.timezone('Asia/Tokyo')
+        
+        # Test from Jan 31 (31 days)
+        base_date = datetime(2024, 1, 31, 10, 30, 45, tzinfo=jst)
+        
+        result_30 = lambda_function.calculate_retention_dates(30, base_date)
+        result_90 = lambda_function.calculate_retention_dates(90, base_date)
+        
+        # 30 days: threshold = Nov 30 (2 months back), new_date_min = Dec 1
+        assert result_30['threshold'].year == 2023
+        assert result_30['threshold'].month == 11
+        assert result_30['threshold'].day == 30
+        assert result_30['new_date_min'].year == 2023
+        assert result_30['new_date_min'].month == 12
+        assert result_30['new_date_min'].day == 1
+        
+        # 90 days: threshold = Sep 30 (4 months back), new_date_min = Oct 1
+        assert result_90['threshold'].year == 2023
+        assert result_90['threshold'].month == 9
+        assert result_90['threshold'].day == 30
+        assert result_90['new_date_min'].year == 2023
+        assert result_90['new_date_min'].month == 10
+        assert result_90['new_date_min'].day == 1
+    
+    def test_edge_case_march_31_to_feb(self):
+        """Test calculation from March 31 going back to February"""
+        jst = pytz.timezone('Asia/Tokyo')
+        
+        # From March 31 (non-leap year)
+        base_date = datetime(2023, 3, 31, tzinfo=jst)
+        
+        result_30 = lambda_function.calculate_retention_dates(30, base_date)
+        
+        # 2 months back from Mar 31 = Jan 31
+        # 1 month back from Mar 31 = Feb 28 (end of Feb in non-leap year), but day=1
+        assert result_30['threshold'].year == 2023
+        assert result_30['threshold'].month == 1
+        assert result_30['threshold'].day == 31
+        assert result_30['new_date_min'].year == 2023
+        assert result_30['new_date_min'].month == 2
+        assert result_30['new_date_min'].day == 1
+    
+    def test_edge_case_leap_year_february(self):
+        """Test calculation with leap year February"""
+        jst = pytz.timezone('Asia/Tokyo')
+        
+        # From Feb 29, 2024 (leap year)
+        base_date = datetime(2024, 2, 29, tzinfo=jst)
+        
+        result_30 = lambda_function.calculate_retention_dates(30, base_date)
+        
+        # 2 months back from Feb 29, 2024 = Dec 29, 2023
+        assert result_30['threshold'].year == 2023
+        assert result_30['threshold'].month == 12
+        assert result_30['threshold'].day == 29
+        
+        # 1 month back from Feb 29, 2024 = Jan 1, 2024
+        assert result_30['new_date_min'].year == 2024
+        assert result_30['new_date_min'].month == 1
+        assert result_30['new_date_min'].day == 1
+    
+    def test_edge_case_april_30(self):
+        """Test calculation from April 30 (30-day month)"""
+        jst = pytz.timezone('Asia/Tokyo')
+        
+        # From April 30
+        base_date = datetime(2024, 4, 30, tzinfo=jst)
+        
+        result_30 = lambda_function.calculate_retention_dates(30, base_date)
+        
+        # 2 months back from Apr 30 = Feb 29 (2024 is leap year)
+        assert result_30['threshold'].year == 2024
+        assert result_30['threshold'].month == 2
+        assert result_30['threshold'].day == 29
+        
+        # 1 month back from Apr 30 = Mar 1
+        assert result_30['new_date_min'].year == 2024
+        assert result_30['new_date_min'].month == 3
+        assert result_30['new_date_min'].day == 1
+    
+    def test_time_component_preserved_in_threshold(self):
+        """Test that time (hour, minute, second) is preserved in threshold"""
+        jst = pytz.timezone('Asia/Tokyo')
+        
+        # Base date with specific time
+        base_date = datetime(2024, 6, 15, 14, 30, 45, tzinfo=jst)
+        
+        result_30 = lambda_function.calculate_retention_dates(30, base_date)
+        result_90 = lambda_function.calculate_retention_dates(90, base_date)
+        
+        # Threshold should preserve time
+        assert result_30['threshold'].hour == 14
+        assert result_30['threshold'].minute == 30
+        assert result_30['threshold'].second == 45
+        
+        assert result_90['threshold'].hour == 14
+        assert result_90['threshold'].minute == 30
+        assert result_90['threshold'].second == 45
+    
+    
+    def test_multiple_year_boundary_90_days(self):
+        """Test 90-day retention crossing multiple years"""
+        jst = pytz.timezone('Asia/Tokyo')
+        
+        # From March 2024, 90-day goes back to Nov 2023
+        base_date = datetime(2024, 3, 10, tzinfo=jst)
+        
+        result = lambda_function.calculate_retention_dates(90, base_date)
+        
+        # 4 months back from Mar 2024 = Nov 2023
+        assert result['threshold'].year == 2023
+        assert result['threshold'].month == 11
+        assert result['threshold'].day == 10
+        
+        # 3 months back from Mar 2024 = Dec 2023
+        assert result['new_date_min'].year == 2023
+        assert result['new_date_min'].month == 12
+        assert result['new_date_min'].day == 1
 
 
-class TestAutoDeleteOldDataHeatmap:
-    """Test auto_delete_old_data_heatmap function with new logic"""
+class TestAutoUpdateDateMinHeatmapSite:
+    """Test auto_update_date_min_heatmap_site function"""
     
     @patch('lambda_function.get_list_package_limit')
     @patch('lambda_function.get_list_heatmap_site_by_package_code')
     @patch('lambda_function.update_date_min')
     @patch('lambda_function.calculate_retention_dates')
-    def test_auto_delete_with_30_day_retention(self, mock_calc_dates, mock_update, 
+    def test_update_date_min_with_30_day_retention(self, mock_calc_dates, mock_update, 
                                                 mock_get_sites, mock_get_packages):
-        """Test auto delete with 30-day retention package"""
+        """Test update date_min with 30-day retention package"""
         jst = pytz.timezone('Asia/Tokyo')
         
         # Mock package data
@@ -488,7 +609,7 @@ class TestAutoDeleteOldDataHeatmap:
         mock_conn = MagicMock()
         
         # Execute
-        lambda_function.auto_delete_old_data_heatmap(mock_conn)
+        lambda_function.auto_update_date_min_heatmap_site(mock_conn)
         
         # Verify
         mock_calc_dates.assert_called_once_with(30)
@@ -497,8 +618,8 @@ class TestAutoDeleteOldDataHeatmap:
     
     @patch('lambda_function.get_list_package_limit')
     @patch('lambda_function.calculate_retention_dates')
-    def test_auto_delete_skips_unsupported_retention(self, mock_calc_dates, mock_get_packages):
-        """Test that unsupported retention days are skipped"""
+    def test_update_date_min_skips_unsupported_retention(self, mock_calc_dates, mock_get_packages):
+        """Test that unsupported retention days are skipped without raising error"""
         # Mock package with unsupported retention
         mock_get_packages.return_value = [
             {'PACKAGE_CODE': 'CUSTOM_60', 'TIME_DELETE_DATA': 60}
@@ -510,7 +631,7 @@ class TestAutoDeleteOldDataHeatmap:
         mock_conn = MagicMock()
         
         # Execute - should not raise error
-        lambda_function.auto_delete_old_data_heatmap(mock_conn)
+        lambda_function.auto_update_date_min_heatmap_site(mock_conn)
         
         # Verify calculate was called but no further processing
         mock_calc_dates.assert_called_once_with(60)
@@ -519,7 +640,7 @@ class TestAutoDeleteOldDataHeatmap:
     @patch('lambda_function.get_list_heatmap_site_by_package_code')
     @patch('lambda_function.update_date_min')
     @patch('lambda_function.calculate_retention_dates')
-    def test_auto_delete_skips_recent_sites(self, mock_calc_dates, mock_update,
+    def test_update_date_min_skips_recent_sites(self, mock_calc_dates, mock_update,
                                             mock_get_sites, mock_get_packages):
         """Test that sites with recent data are not updated"""
         jst = pytz.timezone('Asia/Tokyo')
@@ -542,7 +663,7 @@ class TestAutoDeleteOldDataHeatmap:
         mock_conn = MagicMock()
         
         # Execute
-        lambda_function.auto_delete_old_data_heatmap(mock_conn)
+        lambda_function.auto_update_date_min_heatmap_site(mock_conn)
         
         # Verify update was NOT called
         mock_update.assert_not_called()
@@ -551,7 +672,7 @@ class TestAutoDeleteOldDataHeatmap:
     @patch('lambda_function.get_list_heatmap_site_by_package_code')
     @patch('lambda_function.update_date_min')
     @patch('lambda_function.calculate_retention_dates')
-    def test_auto_delete_handles_string_date_min(self, mock_calc_dates, mock_update,
+    def test_update_date_min_handles_string_date_min(self, mock_calc_dates, mock_update,
                                                   mock_get_sites, mock_get_packages):
         """Test handling of DATE_MIN as string"""
         jst = pytz.timezone('Asia/Tokyo')
@@ -573,7 +694,7 @@ class TestAutoDeleteOldDataHeatmap:
         mock_conn = MagicMock()
         
         # Execute - should not raise error
-        lambda_function.auto_delete_old_data_heatmap(mock_conn)
+        lambda_function.auto_update_date_min_heatmap_site(mock_conn)
         
         # Verify update was called
         mock_update.assert_called_once()
@@ -582,7 +703,7 @@ class TestAutoDeleteOldDataHeatmap:
     @patch('lambda_function.get_list_heatmap_site_by_package_code')
     @patch('lambda_function.update_date_min')
     @patch('lambda_function.calculate_retention_dates')
-    def test_auto_delete_handles_naive_datetime(self, mock_calc_dates, mock_update,
+    def test_update_date_min_handles_naive_datetime(self, mock_calc_dates, mock_update,
                                                  mock_get_sites, mock_get_packages):
         """Test handling of DATE_MIN as naive datetime (no timezone)"""
         jst = pytz.timezone('Asia/Tokyo')
@@ -604,7 +725,7 @@ class TestAutoDeleteOldDataHeatmap:
         mock_conn = MagicMock()
         
         # Execute - should not raise error
-        lambda_function.auto_delete_old_data_heatmap(mock_conn)
+        lambda_function.auto_update_date_min_heatmap_site(mock_conn)
         
         # Verify update was called
         mock_update.assert_called_once()
@@ -612,7 +733,7 @@ class TestAutoDeleteOldDataHeatmap:
     @patch('lambda_function.get_list_package_limit')
     @patch('lambda_function.get_list_heatmap_site_by_package_code')
     @patch('lambda_function.calculate_retention_dates')
-    def test_auto_delete_handles_site_processing_error(self, mock_calc_dates,
+    def test_update_date_min_handles_site_processing_error(self, mock_calc_dates,
                                                         mock_get_sites, mock_get_packages):
         """Test that site processing errors are caught and logged"""
         jst = pytz.timezone('Asia/Tokyo')
@@ -634,13 +755,13 @@ class TestAutoDeleteOldDataHeatmap:
         mock_conn = MagicMock()
         
         # Execute - should not raise error, just log and continue
-        lambda_function.auto_delete_old_data_heatmap(mock_conn)
+        lambda_function.auto_update_date_min_heatmap_site(mock_conn)
         
         # Should complete without raising exception
         assert True
     
     @patch('lambda_function.get_list_package_limit')
-    def test_auto_delete_handles_top_level_error(self, mock_get_packages):
+    def test_update_date_min_handles_top_level_error(self, mock_get_packages):
         """Test that top-level errors are raised"""
         mock_get_packages.side_effect = Exception("Database connection failed")
         
@@ -648,15 +769,15 @@ class TestAutoDeleteOldDataHeatmap:
         
         # Execute - should raise error
         with pytest.raises(Exception):
-            lambda_function.auto_delete_old_data_heatmap(mock_conn)
+            lambda_function.auto_update_date_min_heatmap_site(mock_conn)
     
     @patch('lambda_function.get_list_package_limit')
     @patch('lambda_function.get_list_heatmap_site_by_package_code')
     @patch('lambda_function.update_date_min')
     @patch('lambda_function.calculate_retention_dates')
-    def test_auto_delete_with_multiple_packages(self, mock_calc_dates, mock_update,
+    def test_update_date_min_with_multiple_packages(self, mock_calc_dates, mock_update,
                                                  mock_get_sites, mock_get_packages):
-        """Test auto delete with multiple packages (30 and 90 day retention)"""
+        """Test update date_min with multiple packages (30 and 90 day retention)"""
         jst = pytz.timezone('Asia/Tokyo')
         
         # Mock multiple packages
@@ -686,7 +807,7 @@ class TestAutoDeleteOldDataHeatmap:
         mock_conn = MagicMock()
         
         # Execute
-        lambda_function.auto_delete_old_data_heatmap(mock_conn)
+        lambda_function.auto_update_date_min_heatmap_site(mock_conn)
         
         # Verify both packages were processed
         assert mock_calc_dates.call_count == 2
