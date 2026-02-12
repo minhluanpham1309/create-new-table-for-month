@@ -253,6 +253,7 @@ module "heatmap_japan_dev" {
     
     lambda_inline_policies = local.lambda_policies
     lambda_log_retention_in_days = 90
+    lambda_alias = var.lambda_alias
 
     # VPC config
     create_security_group = true
