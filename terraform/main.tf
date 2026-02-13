@@ -41,7 +41,8 @@ module "shared_lambda_role" {
     try(var.monthly_adding_site_tables_producers.lambda_inline_policies, {}),
     try(var.monthly_adding_site_tables_consumer.lambda_inline_policies, {}), 
     try(var.delete_heat_map_cache.lambda_inline_policies, {}),
-    try(var.delete_old_data_heat_map.lambda_inline_policies, {})
+    try(var.delete_old_data_heat_map.lambda_inline_policies, {}),
+    try(var.move_data_to_mysql.lambda_inline_policies, {})
   )
   
   managed_policy_arns = ["arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"]
@@ -88,7 +89,8 @@ module "shared_scheduler_role" {
     try(var.monthly_adding_site_tables_producers.scheduler_inline_policies, {}),
     try(var.monthly_adding_site_tables_consumer.scheduler_inline_policies, {}),
     try(var.delete_heat_map_cache.scheduler_inline_policies, {}),
-    try(var.delete_old_data_heat_map.scheduler_inline_policies, {})
+    try(var.delete_old_data_heat_map.scheduler_inline_policies, {}),
+    try(var.move_data_to_mysql.scheduler_inline_policies, {})
   )
 
   tags = var.tags
@@ -290,4 +292,45 @@ module "delete_old_data_heat_map" {
   schedule_retry_policy = var.delete_old_data_heat_map.schedule_retry_policy
 
   tags = merge(var.tags, try(var.delete_old_data_heat_map.tags, {}))
+}
+
+# Move Data to MySQL (Lambda + EventBridge Scheduler) - Connects to RDS and Valkey
+module "move_data_to_mysql" {
+  source = "./modules/move-data-to-mysql"
+  count  = var.move_data_to_mysql == null ? 0 : 1
+
+  project_name = var.project_name
+
+  lambda_function_name         = var.move_data_to_mysql.lambda_function_name
+  lambda_handler               = var.move_data_to_mysql.lambda_handler
+  lambda_runtime               = var.move_data_to_mysql.lambda_runtime
+  lambda_timeout               = var.move_data_to_mysql.lambda_timeout
+  lambda_memory_size           = var.move_data_to_mysql.lambda_memory_size
+  lambda_architectures         = var.move_data_to_mysql.lambda_architectures
+  lambda_environment_variables = var.move_data_to_mysql.lambda_environment_variables
+  lambda_log_retention_in_days = var.move_data_to_mysql.lambda_log_retention_in_days
+  lambda_alias                 = var.move_data_to_mysql.lambda_alias
+
+  lambda_role_arn = module.shared_lambda_role.role_arn
+
+  # VPC
+  vpc_config               = try(var.move_data_to_mysql.vpc_config, null)
+  create_security_group    = var.move_data_to_mysql.create_security_group
+  rds_security_group_id    = var.move_data_to_mysql.rds_security_group_id
+  smg_end_point_sg_id      = var.move_data_to_mysql.smg_end_point_sg_id
+  valkey_security_group_id = var.move_data_to_mysql.valkey_security_group_id
+  valkey_port              = var.move_data_to_mysql.valkey_port
+
+  # EventBridge Scheduler (optional)
+  schedule_name                = var.move_data_to_mysql.schedule_name
+  schedule_description         = var.move_data_to_mysql.schedule_description
+  schedule_expression          = var.move_data_to_mysql.schedule_expression
+  schedule_expression_timezone = var.move_data_to_mysql.schedule_expression_timezone
+  schedule_enabled             = var.move_data_to_mysql.schedule_enabled
+  schedule_input               = var.move_data_to_mysql.schedule_input
+
+  scheduler_role_arn    = module.shared_scheduler_role.role_arn
+  schedule_retry_policy = var.move_data_to_mysql.schedule_retry_policy
+
+  tags = merge(var.tags, try(var.move_data_to_mysql.tags, {}))
 }

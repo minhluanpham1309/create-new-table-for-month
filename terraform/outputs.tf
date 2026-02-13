@@ -28,3 +28,18 @@ output "monthly_adding_site_tables_consumer" {
     sns_topic_arn                    = module.monthly_adding_site_tables_consumer[0].sns_topic_arn
   }, null)
 }
+
+output "valkey_security_group_id" {
+  description = "Valkey security group ID"
+  value       = var.enable_valkey ? module.valkey[0].security_group_id : null
+}
+
+# Move Data to MySQL outputs
+output "move_data_to_mysql" {
+  description = "Move data to MySQL Lambda info. Null if disabled."
+  value = try({
+    lambda_function_name = module.move_data_to_mysql[0].lambda_function_name
+    lambda_function_arn  = module.move_data_to_mysql[0].lambda_function_arn
+    schedule_name        = module.move_data_to_mysql[0].schedule_name
+  }, null)
+}
