@@ -1,8 +1,6 @@
 import pytest
 import os
-from datetime import datetime
 from unittest.mock import MagicMock, patch
-import pytz
 
 import lambda_function
 
@@ -27,107 +25,6 @@ def mock_secret():
         'dbname': 'HEAT_MAP'
     }
 
-
-class TestGetListPackageLimit:
-    """Test get_list_package_limit function"""
-    
-    def test_get_list_package_limit_success(self, mock_connection):
-        """Test successful retrieval of package limits"""
-        mock_conn, mock_cursor = mock_connection
-        
-        # Mock data
-        expected_results = [
-            {'package_code': 'STANDARD_30', 'time_delete_data': 30},
-            {'package_code': 'PREMIUM_90', 'time_delete_data': 90}
-        ]
-        mock_cursor.fetchall.return_value = expected_results
-        
-        # Execute
-        result = lambda_function.get_list_package_limit(mock_conn)
-        
-        # Verify
-        assert result == expected_results
-        assert len(result) == 2
-        mock_cursor.execute.assert_called_once()
-    
-    def test_get_list_package_limit_empty(self, mock_connection):
-        """Test when no package limits found"""
-        mock_conn, mock_cursor = mock_connection
-        mock_cursor.fetchall.return_value = []
-        
-        result = lambda_function.get_list_package_limit(mock_conn)
-        
-        assert result == []
-        assert len(result) == 0
-    
-    def test_get_list_package_limit_error(self, mock_connection):
-        """Test error handling in get_list_package_limit"""
-        mock_conn, mock_cursor = mock_connection
-        mock_cursor.execute.side_effect = Exception("Database query error")
-        
-        with pytest.raises(Exception):
-            lambda_function.get_list_package_limit(mock_conn)
-
-
-class TestGetListHeatmapSiteByPackageCode:
-    """Test get_list_heatmap_site_by_package_code function"""
-    
-    def test_get_sites_by_package_success(self, mock_connection):
-        """Test successful retrieval of sites by package code"""
-        mock_conn, mock_cursor = mock_connection
-        
-        expected_results = [
-            {'site_id': 12345, 'date_min': '2024-01-01 00:00:00'},
-            {'site_id': 12346, 'date_min': '2024-01-15 00:00:00'}
-        ]
-        mock_cursor.fetchall.return_value = expected_results
-        
-        result = lambda_function.get_list_heatmap_site_by_package_code(mock_conn, 'STANDARD_30')
-        
-        assert result == expected_results
-        assert len(result) == 2
-        mock_cursor.execute.assert_called_once()
-    
-    def test_get_sites_by_package_empty(self, mock_connection):
-        """Test when no sites found for package"""
-        mock_conn, mock_cursor = mock_connection
-        mock_cursor.fetchall.return_value = []
-        
-        result = lambda_function.get_list_heatmap_site_by_package_code(mock_conn, 'NONEXISTENT')
-        
-        assert result == []
-    
-    def test_get_sites_by_package_error(self, mock_connection):
-        """Test error handling in get_list_heatmap_site_by_package_code"""
-        mock_conn, mock_cursor = mock_connection
-        mock_cursor.execute.side_effect = Exception("Database query error")
-        
-        with pytest.raises(Exception):
-            lambda_function.get_list_heatmap_site_by_package_code(mock_conn, 'TEST')
-
-
-class TestUpdateDateMin:
-    """Test update_date_min function"""
-    
-    def test_update_date_min_success(self, mock_connection):
-        """Test successful date_min update"""
-        mock_conn, mock_cursor = mock_connection
-        
-        lambda_function.update_date_min(mock_conn, 12345, '2024-02-01 00:00:00')
-        
-        # Verify query was executed with correct parameters
-        mock_cursor.execute.assert_called_once()
-        call_args = mock_cursor.execute.call_args
-        assert 'UPDATE HEAT_MAP.HEATMAP_SITE' in call_args[0][0]
-        assert call_args[0][1] == ('2024-02-01 00:00:00', 12345)
-    
-    def test_update_date_min_error(self, mock_connection):
-        """Test update_date_min raises error on failure"""
-        mock_conn, mock_cursor = mock_connection
-        mock_cursor.execute.side_effect = Exception("Database error")
-        
-        with pytest.raises(Exception):
-            lambda_function.update_date_min(mock_conn, 12345, '2024-02-01 00:00:00')
 
 
 class TestLambdaHandler:
@@ -359,456 +256,47 @@ class TestGetDBConnection:
             lambda_function.get_db_connection({'host': 'test'})
 
 
-class TestCalculateRetentionDates:
-    """Test calculate_retention_dates function"""
-    
-    def test_30_days_retention(self):
-        """Test calculation for 30-day retention policy"""
-        jst = pytz.timezone('Asia/Tokyo')
-        base_date = datetime(2024, 3, 15, 10, 30, 0, tzinfo=jst)
-        
-        result = lambda_function.calculate_retention_dates(30, base_date)
-        
-        assert result is not None
-        assert 'threshold' in result
-        assert 'new_date_min' in result
-        
-        # 30 days: threshold = 2 months ago
-        assert result['threshold'].year == 2024
-        assert result['threshold'].month == 1
-        assert result['threshold'].day == 15
-        
-        # new_date_min = 1 month ago, day=1
-        assert result['new_date_min'].year == 2024
-        assert result['new_date_min'].month == 2
-        assert result['new_date_min'].day == 1
-    
-    def test_90_days_retention(self):
-        """Test calculation for 90-day retention policy"""
-        jst = pytz.timezone('Asia/Tokyo')
-        base_date = datetime(2024, 5, 20, 14, 0, 0, tzinfo=jst)
-        
-        result = lambda_function.calculate_retention_dates(90, base_date)
-        
-        assert result is not None
-        assert 'threshold' in result
-        assert 'new_date_min' in result
-        
-        # 90 days: threshold = 4 months ago
-        assert result['threshold'].year == 2024
-        assert result['threshold'].month == 1
-        assert result['threshold'].day == 20
-        
-        # new_date_min = 3 months ago, day=1
-        assert result['new_date_min'].year == 2024
-        assert result['new_date_min'].month == 2
-        assert result['new_date_min'].day == 1
-    
-    def test_unsupported_retention_days(self):
-        """Test that unsupported retention days return None"""
-        jst = pytz.timezone('Asia/Tokyo')
-        base_date = datetime(2024, 3, 15, tzinfo=jst)
-        
-        # Test various unsupported values
-        for retention_days in [0, 7, 15, 60, 120, 365, -30]:
-            result = lambda_function.calculate_retention_dates(retention_days, base_date)
-            assert result is None, f"Expected None for retention_days={retention_days}"
-    
-    def test_default_base_date(self):
-        """Test that function uses current_date when base_date is None"""
-        result = lambda_function.calculate_retention_dates(30)
-        
-        assert result is not None
-        assert 'threshold' in result
-        assert 'new_date_min' in result
-    
-    def test_edge_case_year_boundary(self):
-        """Test calculation crossing year boundary"""
-        jst = pytz.timezone('Asia/Tokyo')
-        base_date = datetime(2024, 1, 15, tzinfo=jst)
-        
-        result = lambda_function.calculate_retention_dates(90, base_date)
-        
-        # 4 months ago from Jan 2024 = Sep 2023
-        assert result['threshold'].year == 2023
-        assert result['threshold'].month == 9
-        
-        # 3 months ago from Jan 2024 = Oct 2023
-        assert result['new_date_min'].year == 2023
-        assert result['new_date_min'].month == 10
-        assert result['new_date_min'].day == 1
-    
-    def test_new_date_min_always_day_1(self):
-        """Test that new_date_min is always set to day 1"""
-        jst = pytz.timezone('Asia/Tokyo')
-        
-        # Test with various days of month
-        for day in [1, 15, 28, 31]:
-            base_date = datetime(2024, 3, min(day, 28), tzinfo=jst)
-            
-            result_30 = lambda_function.calculate_retention_dates(30, base_date)
-            result_90 = lambda_function.calculate_retention_dates(90, base_date)
-            
-            assert result_30['new_date_min'].day == 1
-            assert result_90['new_date_min'].day == 1
-    
-    def test_edge_case_month_end_31(self):
-        """Test calculation from months with 31 days"""
-        jst = pytz.timezone('Asia/Tokyo')
-        
-        # Test from Jan 31 (31 days)
-        base_date = datetime(2024, 1, 31, 10, 30, 45, tzinfo=jst)
-        
-        result_30 = lambda_function.calculate_retention_dates(30, base_date)
-        result_90 = lambda_function.calculate_retention_dates(90, base_date)
-        
-        # 30 days: threshold = Nov 30 (2 months back), new_date_min = Dec 1
-        assert result_30['threshold'].year == 2023
-        assert result_30['threshold'].month == 11
-        assert result_30['threshold'].day == 30
-        assert result_30['new_date_min'].year == 2023
-        assert result_30['new_date_min'].month == 12
-        assert result_30['new_date_min'].day == 1
-        
-        # 90 days: threshold = Sep 30 (4 months back), new_date_min = Oct 1
-        assert result_90['threshold'].year == 2023
-        assert result_90['threshold'].month == 9
-        assert result_90['threshold'].day == 30
-        assert result_90['new_date_min'].year == 2023
-        assert result_90['new_date_min'].month == 10
-        assert result_90['new_date_min'].day == 1
-    
-    def test_edge_case_march_31_to_feb(self):
-        """Test calculation from March 31 going back to February"""
-        jst = pytz.timezone('Asia/Tokyo')
-        
-        # From March 31 (non-leap year)
-        base_date = datetime(2023, 3, 31, tzinfo=jst)
-        
-        result_30 = lambda_function.calculate_retention_dates(30, base_date)
-        
-        # 2 months back from Mar 31 = Jan 31
-        # 1 month back from Mar 31 = Feb 28 (end of Feb in non-leap year), but day=1
-        assert result_30['threshold'].year == 2023
-        assert result_30['threshold'].month == 1
-        assert result_30['threshold'].day == 31
-        assert result_30['new_date_min'].year == 2023
-        assert result_30['new_date_min'].month == 2
-        assert result_30['new_date_min'].day == 1
-    
-    def test_edge_case_leap_year_february(self):
-        """Test calculation with leap year February"""
-        jst = pytz.timezone('Asia/Tokyo')
-        
-        # From Feb 29, 2024 (leap year)
-        base_date = datetime(2024, 2, 29, tzinfo=jst)
-        
-        result_30 = lambda_function.calculate_retention_dates(30, base_date)
-        
-        # 2 months back from Feb 29, 2024 = Dec 29, 2023
-        assert result_30['threshold'].year == 2023
-        assert result_30['threshold'].month == 12
-        assert result_30['threshold'].day == 29
-        
-        # 1 month back from Feb 29, 2024 = Jan 1, 2024
-        assert result_30['new_date_min'].year == 2024
-        assert result_30['new_date_min'].month == 1
-        assert result_30['new_date_min'].day == 1
-    
-    def test_edge_case_april_30(self):
-        """Test calculation from April 30 (30-day month)"""
-        jst = pytz.timezone('Asia/Tokyo')
-        
-        # From April 30
-        base_date = datetime(2024, 4, 30, tzinfo=jst)
-        
-        result_30 = lambda_function.calculate_retention_dates(30, base_date)
-        
-        # 2 months back from Apr 30 = Feb 29 (2024 is leap year)
-        assert result_30['threshold'].year == 2024
-        assert result_30['threshold'].month == 2
-        assert result_30['threshold'].day == 29
-        
-        # 1 month back from Apr 30 = Mar 1
-        assert result_30['new_date_min'].year == 2024
-        assert result_30['new_date_min'].month == 3
-        assert result_30['new_date_min'].day == 1
-    
-    def test_time_component_preserved_in_threshold(self):
-        """Test that time (hour, minute, second) is preserved in threshold"""
-        jst = pytz.timezone('Asia/Tokyo')
-        
-        # Base date with specific time
-        base_date = datetime(2024, 6, 15, 14, 30, 45, tzinfo=jst)
-        
-        result_30 = lambda_function.calculate_retention_dates(30, base_date)
-        result_90 = lambda_function.calculate_retention_dates(90, base_date)
-        
-        # Threshold should preserve time
-        assert result_30['threshold'].hour == 14
-        assert result_30['threshold'].minute == 30
-        assert result_30['threshold'].second == 45
-        
-        assert result_90['threshold'].hour == 14
-        assert result_90['threshold'].minute == 30
-        assert result_90['threshold'].second == 45
-    
-    
-    def test_multiple_year_boundary_90_days(self):
-        """Test 90-day retention crossing multiple years"""
-        jst = pytz.timezone('Asia/Tokyo')
-        
-        # From March 2024, 90-day goes back to Nov 2023
-        base_date = datetime(2024, 3, 10, tzinfo=jst)
-        
-        result = lambda_function.calculate_retention_dates(90, base_date)
-        
-        # 4 months back from Mar 2024 = Nov 2023
-        assert result['threshold'].year == 2023
-        assert result['threshold'].month == 11
-        assert result['threshold'].day == 10
-        
-        # 3 months back from Mar 2024 = Dec 2023
-        assert result['new_date_min'].year == 2023
-        assert result['new_date_min'].month == 12
-        assert result['new_date_min'].day == 1
-
-
 class TestAutoUpdateDateMinHeatmapSite:
     """Test auto_update_date_min_heatmap_site function"""
     
-    @patch('lambda_function.get_list_package_limit')
-    @patch('lambda_function.get_list_heatmap_site_by_package_code')
-    @patch('lambda_function.update_date_min')
-    @patch('lambda_function.calculate_retention_dates')
-    def test_update_date_min_with_30_day_retention(self, mock_calc_dates, mock_update, 
-                                                mock_get_sites, mock_get_packages):
-        """Test update date_min with 30-day retention package"""
-        jst = pytz.timezone('Asia/Tokyo')
-        
-        # Mock package data
-        mock_get_packages.return_value = [
-            {'PACKAGE_CODE': 'STANDARD_30', 'TIME_DELETE_DATA': 30}
-        ]
-        
-        # Mock date calculation
-        mock_calc_dates.return_value = {
-            'threshold': datetime(2024, 1, 15, tzinfo=jst),
-            'new_date_min': datetime(2024, 2, 1, tzinfo=jst)
-        }
-        
-        # Mock site data with old date
-        mock_get_sites.return_value = [
-            {'SITE_ID': 12345, 'DATE_MIN': datetime(2024, 1, 1, tzinfo=jst)}
-        ]
-        
-        mock_conn = MagicMock()
+    def test_update_date_min_success(self, mock_connection):
+        """Test successful update of date_min"""
+        mock_conn, mock_cursor = mock_connection
+        mock_cursor.rowcount = 5
         
         # Execute
         lambda_function.auto_update_date_min_heatmap_site(mock_conn)
         
-        # Verify
-        mock_calc_dates.assert_called_once_with(30)
-        mock_get_sites.assert_called_once_with(mock_conn, 'STANDARD_30')
-        mock_update.assert_called_once()
+        # Verify SQL was executed
+        mock_cursor.execute.assert_called_once()
+        call_args = mock_cursor.execute.call_args[0][0]
+        
+        # Verify it's an UPDATE query
+        assert 'UPDATE HEAT_MAP.HEATMAP_SITE' in call_args
+        assert 'LEFT JOIN HEAT_MAP.A_LIMIT_QUANTITY' in call_args
+        assert 'DATE_SUB' in call_args
+        assert 'TIME_DELETE_DATA' in call_args
+        assert 'IS_DELETED = 0' in call_args
     
-    @patch('lambda_function.get_list_package_limit')
-    @patch('lambda_function.calculate_retention_dates')
-    def test_update_date_min_skips_unsupported_retention(self, mock_calc_dates, mock_get_packages):
-        """Test that unsupported retention days are skipped without raising error"""
-        # Mock package with unsupported retention
-        mock_get_packages.return_value = [
-            {'PACKAGE_CODE': 'CUSTOM_60', 'TIME_DELETE_DATA': 60}
-        ]
-        
-        # Mock returns None for unsupported retention
-        mock_calc_dates.return_value = None
-        
-        mock_conn = MagicMock()
+    def test_update_date_min_no_rows_affected(self, mock_connection):
+        """Test when no rows need updating"""
+        mock_conn, mock_cursor = mock_connection
+        mock_cursor.rowcount = 0
         
         # Execute - should not raise error
         lambda_function.auto_update_date_min_heatmap_site(mock_conn)
         
-        # Verify calculate was called but no further processing
-        mock_calc_dates.assert_called_once_with(60)
+        # Verify query was still executed
+        mock_cursor.execute.assert_called_once()
     
-    @patch('lambda_function.get_list_package_limit')
-    @patch('lambda_function.get_list_heatmap_site_by_package_code')
-    @patch('lambda_function.update_date_min')
-    @patch('lambda_function.calculate_retention_dates')
-    def test_update_date_min_skips_recent_sites(self, mock_calc_dates, mock_update,
-                                            mock_get_sites, mock_get_packages):
-        """Test that sites with recent data are not updated"""
-        jst = pytz.timezone('Asia/Tokyo')
-        
-        mock_get_packages.return_value = [
-            {'PACKAGE_CODE': 'STANDARD_30', 'TIME_DELETE_DATA': 30}
-        ]
-        
-        # Threshold is 2 months ago
-        mock_calc_dates.return_value = {
-            'threshold': datetime(2024, 1, 15, tzinfo=jst),
-            'new_date_min': datetime(2024, 2, 1, tzinfo=jst)
-        }
-        
-        # Site date_min is newer than threshold
-        mock_get_sites.return_value = [
-            {'SITE_ID': 12345, 'DATE_MIN': datetime(2024, 2, 1, tzinfo=jst)}
-        ]
-        
-        mock_conn = MagicMock()
-        
-        # Execute
-        lambda_function.auto_update_date_min_heatmap_site(mock_conn)
-        
-        # Verify update was NOT called
-        mock_update.assert_not_called()
-    
-    @patch('lambda_function.get_list_package_limit')
-    @patch('lambda_function.get_list_heatmap_site_by_package_code')
-    @patch('lambda_function.update_date_min')
-    @patch('lambda_function.calculate_retention_dates')
-    def test_update_date_min_handles_string_date_min(self, mock_calc_dates, mock_update,
-                                                  mock_get_sites, mock_get_packages):
-        """Test handling of DATE_MIN as string"""
-        jst = pytz.timezone('Asia/Tokyo')
-        
-        mock_get_packages.return_value = [
-            {'PACKAGE_CODE': 'STANDARD_30', 'TIME_DELETE_DATA': 30}
-        ]
-        
-        mock_calc_dates.return_value = {
-            'threshold': datetime(2024, 1, 15, tzinfo=jst),
-            'new_date_min': datetime(2024, 2, 1, tzinfo=jst)
-        }
-        
-        # Site with DATE_MIN as string
-        mock_get_sites.return_value = [
-            {'SITE_ID': 12345, 'DATE_MIN': '2024-01-01 00:00:00'}
-        ]
-        
-        mock_conn = MagicMock()
-        
-        # Execute - should not raise error
-        lambda_function.auto_update_date_min_heatmap_site(mock_conn)
-        
-        # Verify update was called
-        mock_update.assert_called_once()
-    
-    @patch('lambda_function.get_list_package_limit')
-    @patch('lambda_function.get_list_heatmap_site_by_package_code')
-    @patch('lambda_function.update_date_min')
-    @patch('lambda_function.calculate_retention_dates')
-    def test_update_date_min_handles_naive_datetime(self, mock_calc_dates, mock_update,
-                                                 mock_get_sites, mock_get_packages):
-        """Test handling of DATE_MIN as naive datetime (no timezone)"""
-        jst = pytz.timezone('Asia/Tokyo')
-        
-        mock_get_packages.return_value = [
-            {'PACKAGE_CODE': 'STANDARD_30', 'TIME_DELETE_DATA': 30}
-        ]
-        
-        mock_calc_dates.return_value = {
-            'threshold': datetime(2024, 1, 15, tzinfo=jst),
-            'new_date_min': datetime(2024, 2, 1, tzinfo=jst)
-        }
-        
-        # Site with DATE_MIN as naive datetime
-        mock_get_sites.return_value = [
-            {'SITE_ID': 12345, 'DATE_MIN': datetime(2024, 1, 1)}
-        ]
-        
-        mock_conn = MagicMock()
-        
-        # Execute - should not raise error
-        lambda_function.auto_update_date_min_heatmap_site(mock_conn)
-        
-        # Verify update was called
-        mock_update.assert_called_once()
-    
-    @patch('lambda_function.get_list_package_limit')
-    @patch('lambda_function.get_list_heatmap_site_by_package_code')
-    @patch('lambda_function.calculate_retention_dates')
-    def test_update_date_min_handles_site_processing_error(self, mock_calc_dates,
-                                                        mock_get_sites, mock_get_packages):
-        """Test that site processing errors are caught and logged"""
-        jst = pytz.timezone('Asia/Tokyo')
-        
-        mock_get_packages.return_value = [
-            {'PACKAGE_CODE': 'STANDARD_30', 'TIME_DELETE_DATA': 30}
-        ]
-        
-        mock_calc_dates.return_value = {
-            'threshold': datetime(2024, 1, 15, tzinfo=jst),
-            'new_date_min': datetime(2024, 2, 1, tzinfo=jst)
-        }
-        
-        # Site with invalid DATE_MIN that will cause error
-        mock_get_sites.return_value = [
-            {'SITE_ID': 12345, 'DATE_MIN': 'invalid-date-format'}
-        ]
-        
-        mock_conn = MagicMock()
-        
-        # Execute - should not raise error, just log and continue
-        lambda_function.auto_update_date_min_heatmap_site(mock_conn)
-        
-        # Should complete without raising exception
-        assert True
-    
-    @patch('lambda_function.get_list_package_limit')
-    def test_update_date_min_handles_top_level_error(self, mock_get_packages):
-        """Test that top-level errors are raised"""
-        mock_get_packages.side_effect = Exception("Database connection failed")
-        
-        mock_conn = MagicMock()
+    def test_update_date_min_database_error(self, mock_connection):
+        """Test handling of database errors"""
+        mock_conn, mock_cursor = mock_connection
+        mock_cursor.execute.side_effect = Exception("Database error")
         
         # Execute - should raise error
         with pytest.raises(Exception):
             lambda_function.auto_update_date_min_heatmap_site(mock_conn)
-    
-    @patch('lambda_function.get_list_package_limit')
-    @patch('lambda_function.get_list_heatmap_site_by_package_code')
-    @patch('lambda_function.update_date_min')
-    @patch('lambda_function.calculate_retention_dates')
-    def test_update_date_min_with_multiple_packages(self, mock_calc_dates, mock_update,
-                                                 mock_get_sites, mock_get_packages):
-        """Test update date_min with multiple packages (30 and 90 day retention)"""
-        jst = pytz.timezone('Asia/Tokyo')
-        
-        # Mock multiple packages
-        mock_get_packages.return_value = [
-            {'PACKAGE_CODE': 'STANDARD_30', 'TIME_DELETE_DATA': 30},
-            {'PACKAGE_CODE': 'PREMIUM_90', 'TIME_DELETE_DATA': 90}
-        ]
-        
-        # Mock date calculation for both
-        mock_calc_dates.side_effect = [
-            {
-                'threshold': datetime(2024, 1, 15, tzinfo=jst),
-                'new_date_min': datetime(2024, 2, 1, tzinfo=jst)
-            },
-            {
-                'threshold': datetime(2023, 11, 15, tzinfo=jst),
-                'new_date_min': datetime(2023, 12, 1, tzinfo=jst)
-            }
-        ]
-        
-        # Mock sites for both packages
-        mock_get_sites.side_effect = [
-            [{'SITE_ID': 12345, 'DATE_MIN': datetime(2024, 1, 1, tzinfo=jst)}],
-            [{'SITE_ID': 67890, 'DATE_MIN': datetime(2023, 11, 1, tzinfo=jst)}]
-        ]
-        
-        mock_conn = MagicMock()
-        
-        # Execute
-        lambda_function.auto_update_date_min_heatmap_site(mock_conn)
-        
-        # Verify both packages were processed
-        assert mock_calc_dates.call_count == 2
-        assert mock_get_sites.call_count == 2
-        assert mock_update.call_count == 2
 
 
 if __name__ == '__main__':

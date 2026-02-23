@@ -5,8 +5,6 @@ import ssl
 import os
 import boto3
 from datetime import datetime
-from dateutil.relativedelta import relativedelta
-from typing import List, Dict, Any, Optional
 import pytz
 from dotenv import load_dotenv
 
@@ -173,154 +171,44 @@ def run_step(step_name: str, func, *args, **kwargs):
         raise
 
 
-def calculate_retention_dates(retention_days: int, base_date: datetime = None) -> Optional[Dict[str, datetime]]:
-    """
-    Calculate threshold and new_date_min based on retention days.
-    
-    Args:
-        retention_days: Number of days for retention (30 or 90)
-        base_date: Base date for calculation (defaults to current_date)
-    
-    Returns:
-        Dictionary with 'threshold' and 'new_date_min' datetime objects, or None if unsupported
-    
-    Logic:
-    - 30 days retention: threshold=2 months ago, new_date_min=1 month ago
-    - 90 days retention: threshold=4 months ago, new_date_min=3 months ago
-    - Other values: return None (skip)
-    """
-    if base_date is None:
-        base_date = current_date
-    
-    # Mapping: retention days -> (months to check, months for new date_min)
-    retention_config = {
-        30: {'check_months': 2, 'update_months': 1},
-        90: {'check_months': 4, 'update_months': 3}
-    }
-    
-    config = retention_config.get(retention_days)
-    if not config:
-        return None
-    
-    return {
-        'threshold': base_date - relativedelta(months=config['check_months']),
-        'new_date_min': (base_date - relativedelta(months=config['update_months'])).replace(day=1)
-    }
-
-
 def auto_update_date_min_heatmap_site(connection):
     """
     Automatically update date_min for heatmap sites to delete old data based on package retention limits.
 
     Logic:
-    - 30 days retention: If data exists from 2 months ago or older, update date_min to 1 month ago
-    - 90 days retention: If data exists from 4 months ago or older, update date_min to 3 months ago
+    - Directly sets DATE_MIN to (NOW - TIME_DELETE_DATA days)
+    - Only updates sites where current DATE_MIN is older than the target retention date
+    - This approach quickly brings DATE_MIN to the correct retention window
+    
+    Uses a single UPDATE query for efficiency.
     """
     try:
-        # Get list of package limits
-        package_limits = get_list_package_limit(connection)
-        
-        for package in package_limits:
-            retention_days = package['TIME_DELETE_DATA']
+        # Single UPDATE query to handle all sites
+        with connection.cursor() as cursor:
+            query = """
+                UPDATE HEAT_MAP.HEATMAP_SITE AS HS
+                LEFT JOIN HEAT_MAP.A_LIMIT_QUANTITY AS LQ
+                    ON HS.PACKAGE_CODE = LQ.PACKAGE_CODE
+                SET HS.DATE_MIN = DATE_SUB(
+                                      NOW(),
+                                      INTERVAL COALESCE(LQ.TIME_DELETE_DATA, 30) DAY
+                                  )
+                WHERE
+                    HS.IS_DELETED = 0
+                    AND HS.DATE_MIN < DATE_SUB(
+                            NOW(),
+                            INTERVAL COALESCE(LQ.TIME_DELETE_DATA, 30) DAY
+                        );
+            """
+            cursor.execute(query)
             
-            # Calculate dates using extracted function
-            dates = calculate_retention_dates(retention_days)
-            if dates is None:
-                logger.warning(f"Skipping package {package['PACKAGE_CODE']}: Unsupported retention days {retention_days}")
-                continue
-            
-            threshold = dates['threshold']
-            new_date_min = dates['new_date_min']
-            
-            # Process sites for this package
-            sites = get_list_heatmap_site_by_package_code(connection, package['PACKAGE_CODE'])
-            
-            for site in sites:
-                try:
-                    # Convert DATE_MIN to timezone-aware datetime
-                    site_date_min = site['DATE_MIN']
-                    if isinstance(site_date_min, str):
-                        site_date_min = jst.localize(datetime.strptime(site_date_min, datetime_format))
-                    elif site_date_min.tzinfo is None:
-                        site_date_min = jst.localize(site_date_min)
-                    
-                    # Update if old enough
-                    if site_date_min <= threshold:
-                        new_date_min_str = new_date_min.strftime(datetime_format)
-                        logger.info(f"Updating site {site['SITE_ID']}: {site['DATE_MIN']} -> {new_date_min_str}")
-                        update_date_min(connection, site['SITE_ID'], new_date_min_str)
-                
-                except Exception as e:
-                    logger.error(f"Error processing site {site.get('SITE_ID')}: {str(e)}")
-                    continue
+            rows_affected = cursor.rowcount
+            logger.info(f"Updated date_min for {rows_affected} sites")
     
     except Exception as e:
         logger.error(f"Error in auto_update_date_min_heatmap_site: {str(e)}", exc_info=True)
         raise
 
-
-def get_list_package_limit(connection) -> List[Dict[str, Any]]:
-    """
-    Get list of package limits from database
-    """
-    try:
-        with connection.cursor() as cursor:
-            query = """
-                    SELECT HS.PACKAGE_CODE,
-                           IF(LQ.TIME_DELETE_DATA IS NULL, 30, LQ.TIME_DELETE_DATA) AS TIME_DELETE_DATA
-                    FROM HEAT_MAP.HEATMAP_SITE AS HS
-                    LEFT JOIN HEAT_MAP.A_LIMIT_QUANTITY AS LQ
-                    ON HS.PACKAGE_CODE = LQ.PACKAGE_CODE
-                    WHERE HS.IS_DELETED = 0
-                    GROUP BY HS.PACKAGE_CODE
-                    HAVING TIME_DELETE_DATA IN (30, 90)
-                    """
-            cursor.execute(query)
-            results = cursor.fetchall()
-            logger.info(f"Retrieved {len(results)} package limits")
-            return results
-    except Exception as e:
-        logger.error(f"Error fetching package limits: {str(e)}")
-        raise
-
-
-def get_list_heatmap_site_by_package_code(connection, package_code: str) -> List[Dict[str, Any]]:
-    """
-    Get list of heatmap sites by package code
-    """
-    try:
-        with connection.cursor() as cursor:
-            query = """
-                    SELECT SITE_ID, DATE_MIN
-                    FROM HEAT_MAP.HEATMAP_SITE
-                    WHERE PACKAGE_CODE = %s
-                      AND IS_DELETED = 0 \
-                    """
-            cursor.execute(query, (package_code,))
-            results = cursor.fetchall()
-            logger.info(f"Retrieved {len(results)} sites for package: {package_code}")
-            return results
-    except Exception as e:
-        logger.error(f"Error fetching sites for package {package_code}: {str(e)}")
-        raise
-
-
-def update_date_min(connection, site_id: int, date_update: str):
-    """
-    Update the date_min for a site
-    """
-    try:
-        with connection.cursor() as cursor:
-            query = """
-                    UPDATE HEAT_MAP.HEATMAP_SITE
-                    SET date_min = %s
-                    WHERE site_id = %s \
-                    """
-            cursor.execute(query, (date_update, site_id))
-            logger.info(f"Updated date_min for site_id {site_id}")
-    except Exception as e:
-        logger.error(f"Error updating date_min for site {site_id}: {str(e)}")
-        raise
 
 if __name__ == "__main__":
     lambda_handler()
