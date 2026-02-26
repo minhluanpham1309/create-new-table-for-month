@@ -11,6 +11,7 @@ locals {
   consumer_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_consumer}:${var.lambda_alias}"
   delete_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_delete_heat_map_cache}:${var.lambda_alias}"
   delete_old_data_lambda_arn  = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_delete_old_data_heat_map}:${var.lambda_alias}"
+  move_data_to_mysql_lambda_arn  = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_move_data_to_mysql}:${var.lambda_alias}"
   sns_topic_arn               = "arn:aws:sns:${local.aws_shorthand}:${var.sns_topic_monthly_adding_site_tables_notifications}"
   step_functions_state_machine_arn = "arn:aws:states:${local.aws_shorthand}:stateMachine:${var.sfn_name_monthly_adding_site_tables_consumer}"
 
@@ -41,7 +42,7 @@ locals {
         Sid      = "InvokeLambdaFunction"
         Effect   = "Allow"
         Action   = ["lambda:InvokeFunction"]
-        Resource = [local.producer_lambda_arn , local.delete_lambda_arn, local.delete_old_data_lambda_arn]
+        Resource = [local.producer_lambda_arn , local.delete_lambda_arn, local.delete_old_data_lambda_arn, local.move_data_to_mysql_lambda_arn]
       }]
     })
     

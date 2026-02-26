@@ -353,8 +353,8 @@ variable "move_data_to_mysql" {
     lambda_function_name         = string
     lambda_handler               = optional(string, "lambda_function.lambda_handler")
     lambda_runtime               = optional(string, "python3.11")
-    lambda_timeout               = optional(number, 300)
-    lambda_memory_size           = optional(number, 512)
+    lambda_timeout               = optional(number, 900)
+    lambda_memory_size           = optional(number, 1536)
     lambda_architectures         = optional(list(string), ["x86_64"])
     lambda_environment_variables = optional(map(string), {})
     lambda_log_retention_in_days = optional(number, 90)
