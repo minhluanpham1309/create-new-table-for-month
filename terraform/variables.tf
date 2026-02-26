@@ -344,3 +344,60 @@ variable "delete_old_data_heat_map" {
   nullable = true
   default  = null
 }
+
+# Move Data to MySQL (Lambda + EventBridge Scheduler) - Connects to RDS and Valkey
+variable "move_data_to_mysql" {
+  description = "Configuration for move-data-to-mysql Lambda function"
+  type = object({
+    # Lambda
+    lambda_function_name         = string
+    lambda_handler               = optional(string, "lambda_function.lambda_handler")
+    lambda_runtime               = optional(string, "python3.11")
+    lambda_timeout               = optional(number, 900)
+    lambda_memory_size           = optional(number, 1536)
+    lambda_architectures         = optional(list(string), ["x86_64"])
+    lambda_environment_variables = optional(map(string), {})
+    lambda_log_retention_in_days = optional(number, 90)
+    lambda_alias                 = optional(string, null)
+
+    # Lambda IAM Role (Auto-create if null)
+    lambda_inline_policies = optional(map(string), {})
+
+    # VPC Configuration
+    vpc_config = optional(object({
+      vpc_id             = string
+      subnet_ids         = list(string)
+      security_group_ids = list(string)
+    }))
+    create_security_group    = optional(bool, false)
+    rds_security_group_id    = optional(string, null)
+    smg_end_point_sg_id      = optional(string, null)
+    valkey_security_group_id = optional(string, null)
+    valkey_port              = optional(number, 6379)
+
+    # EventBridge Scheduler (optional)
+    schedule_name                = optional(string, null)
+    schedule_description         = optional(string, "Trigger move-data-to-mysql on a schedule")
+    schedule_expression          = optional(string, "cron(0 2 * * ? *)")
+    schedule_expression_timezone = optional(string, "Asia/Tokyo")
+    schedule_enabled             = optional(bool, true)
+    schedule_input               = optional(any, null)
+
+    # Scheduler IAM Role (Auto-create if null)
+    scheduler_inline_policies = optional(map(string), {})
+
+    schedule_retry_policy = optional(object({
+      maximum_event_age_in_seconds = number
+      maximum_retry_attempts       = number
+    }), {
+      maximum_event_age_in_seconds = 900
+      maximum_retry_attempts       = 3
+    })
+
+    # Tags
+    tags = optional(map(string), {})
+  })
+
+  nullable = true
+  default  = null
+}

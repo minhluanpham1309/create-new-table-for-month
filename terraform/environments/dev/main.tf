@@ -11,6 +11,7 @@ locals {
   consumer_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_consumer}:${var.lambda_alias}"
   delete_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_delete_heat_map_cache}:${var.lambda_alias}"
   delete_old_data_lambda_arn  = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_delete_old_data_heat_map}:${var.lambda_alias}"
+  move_data_to_mysql_lambda_arn  = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_move_data_to_mysql}:${var.lambda_alias}"
   sns_topic_arn               = "arn:aws:sns:${local.aws_shorthand}:${var.sns_topic_monthly_adding_site_tables_notifications}"
   step_functions_state_machine_arn = "arn:aws:states:${local.aws_shorthand}:stateMachine:${var.sfn_name_monthly_adding_site_tables_consumer}"
 
@@ -41,7 +42,7 @@ locals {
         Sid      = "InvokeLambdaFunction"
         Effect   = "Allow"
         Action   = ["lambda:InvokeFunction"]
-        Resource = [local.producer_lambda_arn , local.delete_lambda_arn, local.delete_old_data_lambda_arn]
+        Resource = [local.producer_lambda_arn , local.delete_lambda_arn, local.delete_old_data_lambda_arn, local.move_data_to_mysql_lambda_arn]
       }]
     })
     
@@ -97,7 +98,7 @@ module "heatmap_japan_dev" {
   allowed_security_group_ids = ["sg-01bac204cde449aee", "sg-06addf3041186f839", "sg-03b92aa686c2d348d"]
   
   # Valkey - Disable Terraform management (managed manually on AWS)
-  enable_valkey = false
+  enable_valkey = true
   
   # Valkey configuration for dev - single node for cost savings
   valkey_node_type                  = "cache.t4g.micro" # Smallest ARM-based instance
@@ -272,6 +273,54 @@ module "heatmap_japan_dev" {
     # Scheduler configuration
     schedule_name = "delete-old-data-heat-map-schedule"
     schedule_expression = "cron(0 0 1 * ? *)"
+    scheduler_inline_policies = {
+      "invoke-lambda" = local.eventbridge_scheduler_policies["invoke-lambda"]
+    }
+
+    schedule_retry_policy = {
+      maximum_event_age_in_seconds = 900
+      maximum_retry_attempts       = 3
+    }
+  }
+
+  # Move Data to MySQL (Lambda + EventBridge Scheduler) - Connects to RDS and Valkey
+  move_data_to_mysql = {
+    # Lambda function configuration
+    lambda_function_name = var.lambda_function_name_move_data_to_mysql
+
+    lambda_environment_variables = {
+      RDS_SECRET_NAME = "rds/db-test-private"
+      REDIS_HOST      = module.heatmap_japan_dev.valkey_endpoint
+      REDIS_PORT      = "6379"
+      REDIS_DB        = "0"
+      REDIS_SSL       = "false"
+    }
+    
+    lambda_inline_policies = local.lambda_policies
+    lambda_log_retention_in_days = 90
+    lambda_alias = var.lambda_alias
+
+    # VPC config
+    create_security_group = true
+    vpc_config = {
+      vpc_id             = "vpc-08586cd9f6ce3a905"
+      subnet_ids         = ["subnet-0ffa21d23c30bbf14", "subnet-09e78cbbf83798d9a", "subnet-0071f6115ba604b19"]
+      security_group_ids = []
+    }
+
+    # RDS Security Group
+    rds_security_group_id = "sg-0ec24edb38ce58304"
+
+    # Secrets Manager End Point Security Group
+    smg_end_point_sg_id = "sg-00ca8426775d6c9b3"
+
+    # Valkey Security Group
+    valkey_security_group_id = module.heatmap_japan_dev.valkey_security_group_id
+    valkey_port              = 6379
+
+    # Scheduler configuration (optional - comment out if not needed)
+    schedule_name = "move-data-to-mysql-schedule"
+    schedule_expression = "cron(0 3 * * ? *)" # Daily at 3 AM UTC
     scheduler_inline_policies = {
       "invoke-lambda" = local.eventbridge_scheduler_policies["invoke-lambda"]
     }

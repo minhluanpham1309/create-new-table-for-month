@@ -28,3 +28,9 @@ output "monthly_adding_site_tables_consumer" {
     sns_topic_arn                    = module.monthly_adding_site_tables_consumer[0].sns_topic_arn
   }, null)
 }
+
+output "valkey_security_group_id" {
+  description = "Valkey security group ID"
+  value       = var.enable_valkey ? module.valkey[0].security_group_id : null
+}
+

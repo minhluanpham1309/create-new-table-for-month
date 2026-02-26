@@ -25,3 +25,7 @@ variable "lambda_function_name_delete_old_data_heat_map" {
 variable "lambda_alias" {
   default = "live"
 }
+
+variable "lambda_function_name_move_data_to_mysql" {
+  default = "MoveDataToMysql"
+}

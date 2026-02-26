@@ -8,10 +8,6 @@ resource "aws_elasticache_subnet_group" "valkey" {
       Name = "${var.project_name}-valkey-subnet-group"
     }
   )
-  
-  lifecycle {
-    ignore_changes = all
-  }
 }
 
 resource "aws_security_group" "valkey" {
@@ -44,7 +40,6 @@ resource "aws_security_group" "valkey" {
 
   lifecycle {
     create_before_destroy = true
-    ignore_changes        = all
   }
 }
 
@@ -98,10 +93,6 @@ resource "aws_elasticache_replication_group" "valkey" {
     aws_security_group.valkey,
     aws_cloudwatch_log_group.valkey_slow
   ]
-  
-  lifecycle {
-    ignore_changes = all
-  }
 }
 
 resource "aws_cloudwatch_log_group" "valkey_slow" {
@@ -114,10 +105,6 @@ resource "aws_cloudwatch_log_group" "valkey_slow" {
       Name = "${var.project_name}-valkey-slow-log"
     }
   )
-  
-  lifecycle {
-    ignore_changes = all
-  }
 }
 
 # CloudWatch Alarms - Node-specific monitoring for node 0001
@@ -141,10 +128,6 @@ resource "aws_cloudwatch_metric_alarm" "valkey_cpu" {
   }
 
   tags = var.tags
-  
-  lifecycle {
-    ignore_changes = all
-  }
 }
 
 # Memory - Node 001
@@ -167,8 +150,4 @@ resource "aws_cloudwatch_metric_alarm" "valkey_memory" {
   }
 
   tags = var.tags
-  
-  lifecycle {
-    ignore_changes = all
-  }
 }
