@@ -1106,7 +1106,7 @@ def add_page_view(connection, site_id: str, data_list: List[Dict], table_name: s
         connection.autocommit(False)
         
         with connection.cursor() as cursor:
-            table = f"{site_id}.{table_name}_referrer"
+            table = f"`{site_id}`.`{table_name}_referrer`"
             
             sql = f"""
                 INSERT INTO {table} 
@@ -1163,7 +1163,7 @@ def add_click(connection, site_id: str, data_list: List[Dict], table_name: str) 
         connection.autocommit(False)
         
         with connection.cursor() as cursor:
-            table = f"{site_id}.{table_name}_click"
+            table = f"`{site_id}`.`{table_name}_click`"
             
             sql = f"""
                 INSERT INTO {table} 
@@ -1213,7 +1213,7 @@ def add_scroll(connection, site_id: str, data_list: List[Dict], table_name: str)
         connection.autocommit(False)
         
         with connection.cursor() as cursor:
-            table = f"{site_id}.{table_name}_scroll"
+            table = f"`{site_id}.`{table_name}_scroll`"
             
             sql = f"""
                 INSERT INTO {table} 
@@ -1258,7 +1258,7 @@ def add_read(connection, site_id: str, data_list: List[Dict], table_name: str) -
         connection.autocommit(False)
         
         with connection.cursor() as cursor:
-            table = f"{site_id}.{table_name}_read"
+            table = f"`{site_id}`.`{table_name}_read`"
             
             sql = f"""
                 INSERT INTO {table} 
