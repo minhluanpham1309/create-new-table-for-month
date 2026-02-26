@@ -1,16 +1,3 @@
-"""
-AWS Lambda function to move heatmap data from Redis to MySQL
-Equivalent to ExecuteMoveDataToMySQLV2.java - CORRECTED VERSION
-
-This Lambda function:
-1. Gets current time minus 1 hour (JST timezone)
-2. Fetches Redis keys matching the date pattern
-3. Filters out chunk index keys
-4. Processes data in parallel using ThreadPoolExecutor
-5. Moves data from Redis to MySQL with proper caching
-6. Deletes Redis keys after successful migration
-"""
-
 import json
 import logging
 import pymysql
