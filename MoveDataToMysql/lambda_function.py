@@ -771,19 +771,45 @@ def insert_reads(connection, site_id: str, data: List[Dict], table_name: str) ->
 # TOTAL PV TRACKING
 # ============================================================================
 
+def get_package_code_from_redis(site_id: str) -> Optional[str]:
+    """
+    Fetch PACKAGE_CODE from Redis hash 'list_sites_setup' using site_id as field.
+    Mirrors Java: redissonUtils.getHashByKey("list_sites_setup", siteId)
+    """
+    try:
+        val = get_redis_client().hget("list_sites_setup", site_id)
+        return val if val else None
+    except Exception:
+        logger.exception(f"get_package_code_from_redis failed for site={site_id}")
+        return None
+
+
 def store_total_pv(
     connection: pymysql.connections.Connection,
     site_id: str,
     table_name: str,
     count: int,
 ) -> bool:
+    """
+    Upsert a row into HEAT_MAP.TRACKED_PV.
+    table_name is in YYYYMM format; YEAR and MONTH are extracted from it.
+    PACKAGE_CODE is resolved from Redis hash 'list_sites_setup'.
+    """
+    package_code = get_package_code_from_redis(site_id)
+    if package_code is None:
+        logger.info(f"store_total_pv: package code is null for site={site_id}, skipping")
+        return False
+
     try:
+        year  = int(table_name[:4])
+        month = int(table_name[4:6])
+
         with connection.cursor() as cur:
             cur.execute(
-                "INSERT INTO HEAT_MAP.TRACKED_PV (site_id, table_name, total_pv, created_at) "
-                "VALUES (%s, %s, %s, NOW()) "
-                "ON DUPLICATE KEY UPDATE total_pv = total_pv + VALUES(total_pv), updated_at = NOW()",
-                (site_id, table_name, count),
+                "INSERT INTO HEAT_MAP.TRACKED_PV (PACKAGE_CODE, SITE_ID, YEAR, MONTH, COUNT, CREATED, UPDATED) "
+                "VALUES (%s, %s, %s, %s, %s, NOW(), NOW()) "
+                "ON DUPLICATE KEY UPDATE COUNT = COUNT + VALUES(COUNT), UPDATED = NOW()",
+                (package_code, site_id, year, month, count),
             )
         connection.commit()
         logger.info(f"Stored total PV {count} for site={site_id} table={table_name}")
