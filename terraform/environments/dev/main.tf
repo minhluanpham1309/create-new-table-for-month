@@ -291,8 +291,10 @@ module "heatmap_japan_dev" {
     lambda_environment_variables = {
       RDS_SECRET_NAME = "rds/db-test-private"
       REDIS_HOST      = module.heatmap_japan_dev.valkey_endpoint
+      REDIS_NETTY_HOST = 172.31.16.248
       REDIS_PORT      = "6379"
-      REDIS_DB        = "0"
+      REDIS_DB        = "1"
+      REDIS_NETTY_DB  = "0"
       REDIS_SSL       = "false"
     }
     
@@ -320,7 +322,7 @@ module "heatmap_japan_dev" {
 
     # Scheduler configuration (optional - comment out if not needed)
     schedule_name = "move-data-to-mysql-schedule"
-    schedule_expression = "cron(0 3 * * ? *)" # Daily at 3 AM UTC
+    schedule_expression = "cron(5 * * * ? *)" # Daily at 5 minutes past every hour
     scheduler_inline_policies = {
       "invoke-lambda" = local.eventbridge_scheduler_policies["invoke-lambda"]
     }

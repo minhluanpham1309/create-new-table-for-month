@@ -19,6 +19,7 @@ from common import (
     # helpers
     get_max_workers,
     get_redis_client,
+    get_package_redis_client,
     get_region,
     get_secret,
     get_ssl_context,
@@ -31,9 +32,14 @@ from common import (
     set_to_redis_cache,
 )
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# logger = logging.getLogger()
+# logger.setLevel(logging.INFO)
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # LAMBDA HANDLER
@@ -777,7 +783,7 @@ def get_package_code_from_redis(site_id: str) -> Optional[str]:
     Mirrors Java: redissonUtils.getHashByKey("list_sites_setup", siteId)
     """
     try:
-        val = get_redis_client().hget("list_sites_setup", site_id)
+        val = get_package_redis_client().hget("list_sites_setup", site_id)
         return val if val else None
     except Exception:
         logger.exception(f"get_package_code_from_redis failed for site={site_id}")

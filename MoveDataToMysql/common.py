@@ -79,45 +79,67 @@ class CacheType(Enum):
 # GLOBAL SINGLETONS  (initialized once per Lambda container)
 # ============================================================================
 
-_redis_pool: Optional[redis.ConnectionPool] = None
 _redis_client: Optional[redis.Redis] = None
-_secret_cache: Optional[Dict] = None          # cache secret within same invocation
+_secret_cache: Optional[Dict] = None
 _redis_lock = threading.Lock()
+
+# Redis client for package_code (separate host, db=0)
+_package_redis_client: Optional[redis.Redis] = None
+_package_redis_lock = threading.Lock()
 
 
 def get_max_workers() -> int:
     return int(os.environ.get("MAX_WORKERS", 10))
 
 
+def _create_redis_client(host: str, port: int, password: Optional[str], db: int, label: str) -> redis.Redis:
+    """
+    Create a Redis client backed by a connection pool.
+    """
+    pool = redis.ConnectionPool(
+        host=host,
+        port=port,
+        password=password,
+        db=db,
+        decode_responses=True,
+        max_connections=20,
+        socket_connect_timeout=5,
+        socket_timeout=5,
+    )
+    client = redis.Redis(connection_pool=pool)
+    client.ping()
+    logger.info(f"{label} Redis connection pool initialized")
+    return client
+
+
 def get_redis_client() -> redis.Redis:
-    """
-    Return a thread-safe Redis client backed by a connection pool.
-    Uses a Lock to prevent duplicate pool creation when multiple threads
-    call this concurrently before the singleton is ready.
-    """
-    global _redis_pool, _redis_client
+    global _redis_client
     if _redis_client is None:
         with _redis_lock:
-            # Double-checked locking: re-check after acquiring lock
             if _redis_client is None:
-                redis_host     = os.environ["REDIS_HOST"]
-                redis_port     = int(os.environ.get("REDIS_PORT", 6379))
-                redis_password = os.environ.get("REDIS_PASSWORD") or None
-
-                _redis_pool = redis.ConnectionPool(
-                    host=redis_host,
-                    port=redis_port,
-                    password=redis_password,
+                _redis_client = _create_redis_client(
+                    host=os.environ["REDIS_HOST"],
+                    port=int(os.environ.get("REDIS_PORT", 6379)),
+                    password=os.environ.get("REDIS_PASSWORD") or None,
                     db=1,
-                    decode_responses=True,
-                    max_connections=20,
-                    socket_connect_timeout=5,
-                    socket_timeout=5,
+                    label="Main",
                 )
-                _redis_client = redis.Redis(connection_pool=_redis_pool)
-                _redis_client.ping()
-                logger.info("Redis connection pool initialized")
     return _redis_client
+
+
+def get_package_redis_client() -> redis.Redis:
+    global _package_redis_client
+    if _package_redis_client is None:
+        with _package_redis_lock:
+            if _package_redis_client is None:
+                _package_redis_client = _create_redis_client(
+                    host=os.environ["REDIS_NETTY_HOST"],
+                    port=int(os.environ.get("REDIS_PORT", 6379)),
+                    password=os.environ.get("REDIS_PASSWORD") or None,
+                    db=0,
+                    label="Package",
+                )
+    return _package_redis_client
 
 
 # ============================================================================
