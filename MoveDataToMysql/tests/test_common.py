@@ -33,8 +33,8 @@ def _reset_secret_cache():
 
 
 def _reset_redis_singletons():
-    common._redis_pool = None
     common._redis_client = None
+    common._package_redis_client = None
 
 
 # ===========================================================================
@@ -313,6 +313,136 @@ class TestGetRedisClient:
 
         with pytest.raises(Exception, match="Connection refused"):
             common.get_redis_client()
+
+    @patch.dict(os.environ, {"REDIS_HOST": "main-redis", "REDIS_PORT": "6380", "REDIS_PASSWORD": "pass"})
+    @patch("redis.Redis")
+    @patch("redis.ConnectionPool")
+    def test_uses_correct_env_vars(self, mock_pool_cls, mock_redis_cls):
+        """get_redis_client passes REDIS_HOST/PORT/PASSWORD with db=1."""
+        mock_pool_cls.return_value = MagicMock()
+        mock_redis_cls.return_value = MagicMock()
+
+        common.get_redis_client()
+
+        call_kwargs = mock_pool_cls.call_args[1]
+        assert call_kwargs["host"] == "main-redis"
+        assert call_kwargs["port"] == 6380
+        assert call_kwargs["password"] == "pass"
+        assert call_kwargs["db"] == 1
+
+
+class TestGetPackageRedisClient:
+    """Test get_package_redis_client singleton."""
+
+    def setup_method(self):
+        _reset_redis_singletons()
+
+    def teardown_method(self):
+        _reset_redis_singletons()
+
+    @patch.dict(os.environ, {"PACKAGE_REDIS_HOST": "pkg-redis", "PACKAGE_REDIS_PORT": "6379"})
+    @patch("redis.Redis")
+    @patch("redis.ConnectionPool")
+    def test_creates_singleton(self, mock_pool_cls, mock_redis_cls):
+        mock_pool_cls.return_value = MagicMock()
+        mock_rc = MagicMock()
+        mock_redis_cls.return_value = mock_rc
+
+        c1 = common.get_package_redis_client()
+        c2 = common.get_package_redis_client()
+
+        assert c1 is c2
+        mock_pool_cls.assert_called_once()
+        mock_redis_cls.assert_called_once()
+
+    @patch.dict(os.environ, {"PACKAGE_REDIS_HOST": "pkg-redis"})
+    @patch("redis.Redis")
+    @patch("redis.ConnectionPool")
+    def test_raises_on_ping_failure(self, mock_pool_cls, mock_redis_cls):
+        mock_pool_cls.return_value = MagicMock()
+        mock_rc = MagicMock()
+        mock_rc.ping.side_effect = Exception("Connection refused")
+        mock_redis_cls.return_value = mock_rc
+
+        with pytest.raises(Exception, match="Connection refused"):
+            common.get_package_redis_client()
+
+    @patch.dict(os.environ, {
+        "PACKAGE_REDIS_HOST": "pkg-redis",
+        "PACKAGE_REDIS_PORT": "6379",
+        "PACKAGE_REDIS_PASSWORD": "pkgpass",
+    })
+    @patch("redis.Redis")
+    @patch("redis.ConnectionPool")
+    def test_uses_correct_env_vars(self, mock_pool_cls, mock_redis_cls):
+        """get_package_redis_client passes PACKAGE_REDIS_HOST/PORT/PASSWORD with db=0."""
+        mock_pool_cls.return_value = MagicMock()
+        mock_redis_cls.return_value = MagicMock()
+
+        common.get_package_redis_client()
+
+        call_kwargs = mock_pool_cls.call_args[1]
+        assert call_kwargs["host"] == "pkg-redis"
+        assert call_kwargs["port"] == 6379
+        assert call_kwargs["password"] == "pkgpass"
+        assert call_kwargs["db"] == 0
+
+    @patch.dict(os.environ, {"PACKAGE_REDIS_HOST": "pkg-redis", "REDIS_HOST": "main-redis"})
+    @patch("redis.Redis")
+    @patch("redis.ConnectionPool")
+    def test_independent_from_main_redis(self, mock_pool_cls, mock_redis_cls):
+        """Package Redis client is a separate singleton from the main Redis client."""
+        mock_pool_cls.return_value = MagicMock()
+        main_rc = MagicMock()
+        pkg_rc = MagicMock()
+        mock_redis_cls.side_effect = [main_rc, pkg_rc]
+
+        main = common.get_redis_client()
+        pkg = common.get_package_redis_client()
+
+        assert main is not pkg
+
+
+class TestCreateRedisClient:
+    """Test _create_redis_client shared factory."""
+
+    @patch("redis.Redis")
+    @patch("redis.ConnectionPool")
+    def test_creates_pool_with_correct_params(self, mock_pool_cls, mock_redis_cls):
+        mock_pool_cls.return_value = MagicMock()
+        mock_redis_cls.return_value = MagicMock()
+
+        common._create_redis_client("my-host", 6379, "secret", 2, "Test")
+
+        call_kwargs = mock_pool_cls.call_args[1]
+        assert call_kwargs["host"] == "my-host"
+        assert call_kwargs["port"] == 6379
+        assert call_kwargs["password"] == "secret"
+        assert call_kwargs["db"] == 2
+        assert call_kwargs["decode_responses"] is True
+        assert call_kwargs["max_connections"] == 20
+
+    @patch("redis.Redis")
+    @patch("redis.ConnectionPool")
+    def test_calls_ping_on_new_client(self, mock_pool_cls, mock_redis_cls):
+        mock_pool_cls.return_value = MagicMock()
+        mock_rc = MagicMock()
+        mock_redis_cls.return_value = mock_rc
+
+        common._create_redis_client("host", 6379, None, 0, "Label")
+
+        mock_rc.ping.assert_called_once()
+
+    @patch("redis.Redis")
+    @patch("redis.ConnectionPool")
+    def test_returns_redis_client(self, mock_pool_cls, mock_redis_cls):
+        mock_pool_cls.return_value = MagicMock()
+        mock_rc = MagicMock()
+        mock_redis_cls.return_value = mock_rc
+
+        result = common._create_redis_client("host", 6379, None, 1, "Main")
+
+        assert result is mock_rc
 
 
 class TestScanRedisKeys:

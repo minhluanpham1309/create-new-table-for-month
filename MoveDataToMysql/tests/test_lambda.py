@@ -21,15 +21,15 @@ import common
 
 @pytest.fixture(autouse=True)
 def reset_global_state():
-    original_redis_pool = common._redis_pool
     original_redis_client = common._redis_client
+    original_package_redis_client = common._package_redis_client
     original_secret_cache = common._secret_cache
-    common._redis_pool = None
     common._redis_client = None
+    common._package_redis_client = None
     common._secret_cache = None
     yield
-    common._redis_pool = original_redis_pool
     common._redis_client = original_redis_client
+    common._package_redis_client = original_package_redis_client
     common._secret_cache = original_secret_cache
 
 
@@ -453,7 +453,7 @@ class TestGetPackageCodeFromRedis:
     def test_returns_package_code_when_found(self, mock_redis_client):
         """hget returns a value → function returns it."""
         mock_redis_client.hget.return_value = 'STANDARD_30'
-        with patch('lambda_function.get_redis_client', return_value=mock_redis_client):
+        with patch('lambda_function.get_package_redis_client', return_value=mock_redis_client):
             result = lambda_function.get_package_code_from_redis('123')
         assert result == 'STANDARD_30'
         mock_redis_client.hget.assert_called_once_with('list_sites_setup', '123')
@@ -461,21 +461,21 @@ class TestGetPackageCodeFromRedis:
     def test_returns_none_when_key_not_found(self, mock_redis_client):
         """hget returns None → function returns None."""
         mock_redis_client.hget.return_value = None
-        with patch('lambda_function.get_redis_client', return_value=mock_redis_client):
+        with patch('lambda_function.get_package_redis_client', return_value=mock_redis_client):
             result = lambda_function.get_package_code_from_redis('999')
         assert result is None
 
     def test_returns_none_when_value_is_empty_string(self, mock_redis_client):
         """hget returns empty string → treated as falsy → returns None."""
         mock_redis_client.hget.return_value = ''
-        with patch('lambda_function.get_redis_client', return_value=mock_redis_client):
+        with patch('lambda_function.get_package_redis_client', return_value=mock_redis_client):
             result = lambda_function.get_package_code_from_redis('123')
         assert result is None
 
     def test_returns_none_on_redis_exception(self, mock_redis_client):
         """Redis raises → exception is caught and None is returned."""
         mock_redis_client.hget.side_effect = Exception('Redis connection error')
-        with patch('lambda_function.get_redis_client', return_value=mock_redis_client):
+        with patch('lambda_function.get_package_redis_client', return_value=mock_redis_client):
             result = lambda_function.get_package_code_from_redis('123')
         assert result is None
 
@@ -486,11 +486,10 @@ class TestTotalPVTracking:
         """Happy path: package code found in Redis, row inserted, commit called."""
         conn, cursor = mock_db_connection
         mock_redis_client.hget.return_value = 'STANDARD_30'
-        with patch('lambda_function.get_redis_client', return_value=mock_redis_client):
+        with patch('lambda_function.get_package_redis_client', return_value=mock_redis_client):
             result = lambda_function.store_total_pv(conn, '42', '202601', 150)
         assert result is True
         cursor.execute.assert_called_once()
-        # Verify correct SQL columns
         call_args = cursor.execute.call_args[0]
         assert 'PACKAGE_CODE' in call_args[0]
         assert 'SITE_ID'      in call_args[0]
@@ -505,21 +504,20 @@ class TestTotalPVTracking:
         """YEAR and MONTH are correctly extracted from table_name (YYYYMM)."""
         conn, cursor = mock_db_connection
         mock_redis_client.hget.return_value = 'PREMIUM_90'
-        with patch('lambda_function.get_redis_client', return_value=mock_redis_client):
+        with patch('lambda_function.get_package_redis_client', return_value=mock_redis_client):
             lambda_function.store_total_pv(conn, '10', '202603', 50)
         params = cursor.execute.call_args[0][1]
-        # params = (package_code, site_id, year, month, count)
-        assert params[0] == 'PREMIUM_90'   # PACKAGE_CODE
-        assert params[1] == '10'           # SITE_ID
-        assert params[2] == 2026           # YEAR
-        assert params[3] == 3             # MONTH
-        assert params[4] == 50            # COUNT
+        assert params[0] == 'PREMIUM_90'
+        assert params[1] == '10'
+        assert params[2] == 2026
+        assert params[3] == 3
+        assert params[4] == 50
 
     def test_store_total_pv_returns_false_when_package_code_is_none(self, mock_db_connection, mock_redis_client):
         """No package code in Redis → return False immediately, no DB call."""
         conn, cursor = mock_db_connection
         mock_redis_client.hget.return_value = None
-        with patch('lambda_function.get_redis_client', return_value=mock_redis_client):
+        with patch('lambda_function.get_package_redis_client', return_value=mock_redis_client):
             result = lambda_function.store_total_pv(conn, '99', '202601', 10)
         assert result is False
         cursor.execute.assert_not_called()
@@ -530,7 +528,7 @@ class TestTotalPVTracking:
         conn, cursor = mock_db_connection
         mock_redis_client.hget.return_value = 'STANDARD_30'
         cursor.execute.side_effect = Exception('DB error')
-        with patch('lambda_function.get_redis_client', return_value=mock_redis_client):
+        with patch('lambda_function.get_package_redis_client', return_value=mock_redis_client):
             result = lambda_function.store_total_pv(conn, '42', '202601', 100)
         assert result is False
         conn.rollback.assert_called_once()
@@ -540,7 +538,7 @@ class TestTotalPVTracking:
         """SQL must contain ON DUPLICATE KEY UPDATE to increment COUNT."""
         conn, cursor = mock_db_connection
         mock_redis_client.hget.return_value = 'STANDARD_30'
-        with patch('lambda_function.get_redis_client', return_value=mock_redis_client):
+        with patch('lambda_function.get_package_redis_client', return_value=mock_redis_client):
             lambda_function.store_total_pv(conn, '1', '202601', 5)
         sql = cursor.execute.call_args[0][0]
         assert 'ON DUPLICATE KEY UPDATE' in sql
@@ -550,7 +548,7 @@ class TestTotalPVTracking:
         """site_id passed to hget and to the SQL params."""
         conn, cursor = mock_db_connection
         mock_redis_client.hget.return_value = 'STANDARD_30'
-        with patch('lambda_function.get_redis_client', return_value=mock_redis_client):
+        with patch('lambda_function.get_package_redis_client', return_value=mock_redis_client):
             lambda_function.store_total_pv(conn, '777', '202612', 1)
         mock_redis_client.hget.assert_called_once_with('list_sites_setup', '777')
         params = cursor.execute.call_args[0][1]
