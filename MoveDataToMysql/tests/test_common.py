@@ -340,7 +340,7 @@ class TestGetPackageRedisClient:
     def teardown_method(self):
         _reset_redis_singletons()
 
-    @patch.dict(os.environ, {"PACKAGE_REDIS_HOST": "pkg-redis", "PACKAGE_REDIS_PORT": "6379"})
+    @patch.dict(os.environ, {"REDIS_NETTY_HOST": "pkg-redis", "REDIS_PORT": "6379"})
     @patch("redis.Redis")
     @patch("redis.ConnectionPool")
     def test_creates_singleton(self, mock_pool_cls, mock_redis_cls):
@@ -355,7 +355,7 @@ class TestGetPackageRedisClient:
         mock_pool_cls.assert_called_once()
         mock_redis_cls.assert_called_once()
 
-    @patch.dict(os.environ, {"PACKAGE_REDIS_HOST": "pkg-redis"})
+    @patch.dict(os.environ, {"REDIS_NETTY_HOST": "pkg-redis"})
     @patch("redis.Redis")
     @patch("redis.ConnectionPool")
     def test_raises_on_ping_failure(self, mock_pool_cls, mock_redis_cls):
@@ -368,14 +368,14 @@ class TestGetPackageRedisClient:
             common.get_package_redis_client()
 
     @patch.dict(os.environ, {
-        "PACKAGE_REDIS_HOST": "pkg-redis",
-        "PACKAGE_REDIS_PORT": "6379",
-        "PACKAGE_REDIS_PASSWORD": "pkgpass",
+        "REDIS_NETTY_HOST": "pkg-redis",
+        "REDIS_PORT": "6379",
+        "REDIS_PASSWORD": "pkgpass",
     })
     @patch("redis.Redis")
     @patch("redis.ConnectionPool")
     def test_uses_correct_env_vars(self, mock_pool_cls, mock_redis_cls):
-        """get_package_redis_client passes PACKAGE_REDIS_HOST/PORT/PASSWORD with db=0."""
+        """get_package_redis_client passes REDIS_NETTY_HOST/REDIS_PORT/REDIS_PASSWORD with db=0."""
         mock_pool_cls.return_value = MagicMock()
         mock_redis_cls.return_value = MagicMock()
 
@@ -387,7 +387,7 @@ class TestGetPackageRedisClient:
         assert call_kwargs["password"] == "pkgpass"
         assert call_kwargs["db"] == 0
 
-    @patch.dict(os.environ, {"PACKAGE_REDIS_HOST": "pkg-redis", "REDIS_HOST": "main-redis"})
+    @patch.dict(os.environ, {"REDIS_NETTY_HOST": "pkg-redis", "REDIS_HOST": "main-redis"})
     @patch("redis.Redis")
     @patch("redis.ConnectionPool")
     def test_independent_from_main_redis(self, mock_pool_cls, mock_redis_cls):
