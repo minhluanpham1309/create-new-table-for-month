@@ -780,7 +780,7 @@ def store_total_pv(
     try:
         with connection.cursor() as cur:
             cur.execute(
-                "INSERT INTO HEAT_MAP.tracked_pv (site_id, table_name, total_pv, created_at) "
+                "INSERT INTO HEAT_MAP.TRACKED_PV (site_id, table_name, total_pv, created_at) "
                 "VALUES (%s, %s, %s, NOW()) "
                 "ON DUPLICATE KEY UPDATE total_pv = total_pv + VALUES(total_pv), updated_at = NOW()",
                 (site_id, table_name, count),
