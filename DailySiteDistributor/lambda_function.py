@@ -4,6 +4,7 @@ import pymysql
 import ssl
 import os
 import boto3
+import calendar
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 import pytz
@@ -34,18 +35,26 @@ def lambda_handler(event=None, context=None):
     try:
         logger.info("Lambda function started")
 
+        jst = pytz.timezone('Asia/Tokyo')
+        today = datetime.now(jst)
+        site_chunk_days = calendar.monthrange(today.year, today.month)[1]
+        table_name = f"MONTHLY_ADDING_SITE_TABLE_{today.strftime('%Y%m')}"
+        logger.info(f"Month: {today.strftime('%Y-%m')}, days: {site_chunk_days}, table: {table_name}")
+
         secret = run_step("get_secret", get_secret, region)
 
         cnx = run_step("get_db_connection", get_db_connection, secret)
         cursor = cnx.cursor()
 
+        run_step("create_monthly_table", create_monthly_table, cnx, table_name)
+
         sites = run_step("get_all_sites", get_all_sites, cnx)
 
-        sublists = run_step("split_into_chunk", split_into_chunk, sites)
+        sublists = run_step("split_into_chunk", split_into_chunk, sites, site_chunk_days)
 
         schedule = run_step("generate_schedule", generate_schedule, sublists)
 
-        run_step("insert_schedule_to_db", insert_schedule_to_db, cnx, schedule)
+        run_step("insert_schedule_to_db", insert_schedule_to_db, cnx, schedule, table_name)
 
         # Prepare success response
         if cnx:
@@ -138,6 +147,24 @@ def get_db_connection(secret):
         logger.error(f"Failed to connect to database: {str(e)}")
 
 
+def create_monthly_table(connection, table_name: str):
+    try:
+        with connection.cursor() as cursor:
+            create_query = f"""
+                           CREATE TABLE IF NOT EXISTS HEAT_MAP.{table_name} (
+                               APPLY_ON DATE NOT NULL,
+                               LIST_SITES JSON,
+                               PRIMARY KEY (APPLY_ON)
+                           )
+                           """
+            cursor.execute(create_query)
+        logger.info(f"Table HEAT_MAP.{table_name} created or already exists")
+
+    except Exception as e:
+        logger.error(f"Error creating monthly table {table_name}: {str(e)}")
+        raise
+
+
 def get_all_sites(connection) -> List[Dict[str, Any]]:
     try:
         with connection.cursor() as cursor:
@@ -157,17 +184,17 @@ def get_all_sites(connection) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching sites: {str(e)}")
         raise
 
-def split_into_chunk(sites: List[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
+def split_into_chunk(sites: List[Dict[str, Any]], days: int) -> Dict[int, List[Dict[str, Any]]]:
     if not sites:
         logger.error("No sites to split...")
-        return {day: [] for day in range(1, SITE_CHUNK_DAYS + 1)}
+        return {day: [] for day in range(1, days + 1)}
 
     n = len(sites)
-    base = n // SITE_CHUNK_DAYS
-    extra = n % SITE_CHUNK_DAYS
+    base = n // days
+    extra = n % days
 
     # Create sizes array
-    sizes = np.full(SITE_CHUNK_DAYS, base)
+    sizes = np.full(days, base)
     sizes[:extra] += 1
 
     # Split
@@ -195,14 +222,14 @@ def generate_schedule(sublists: Dict[int, List[Dict[str, Any]]]) -> Dict[str, An
         for day in sublists.keys()
     }
 
-def insert_schedule_to_db(connection, schedule: Dict[str, Any]):
+def insert_schedule_to_db(connection, schedule: Dict[str, Any], table_name: str):
     try:
         with connection.cursor() as cursor:
             # Prepare insert query
-            insert_query = """
-                           INSERT INTO HEAT_MAP.MONTHLY_ADDING_SITE_TABLES
+            insert_query = f"""
+                           INSERT INTO HEAT_MAP.{table_name}
                                (APPLY_ON, LIST_SITES)
-                           VALUES (%s, %s) 
+                           VALUES (%s, %s)
                            ON DUPLICATE KEY UPDATE
                                 LIST_SITES = VALUES(LIST_SITES)
                            """
@@ -218,7 +245,7 @@ def insert_schedule_to_db(connection, schedule: Dict[str, Any]):
                 cursor.execute(insert_query, (apply_on, list_sites_json))
                 inserted_count += 1
 
-            logger.info(f"Successfully inserted {inserted_count} records into MONTHLY_ADDING_SITE_TABLES")
+            logger.info(f"Successfully inserted {inserted_count} records into HEAT_MAP.{table_name}")
 
     except Exception as e:
         logger.error(f"Error inserting schedule to database: {str(e)}")
