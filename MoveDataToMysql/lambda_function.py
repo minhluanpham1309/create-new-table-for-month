@@ -469,7 +469,7 @@ def parse_pageview_data(
 
     for row in raw_data:
         try:
-            p = row.split(DELIMITER)
+            p = row.strip('"').split(DELIMITER)
             if len(p) < 3:
                 continue
 
@@ -524,7 +524,7 @@ def parse_click_data(raw_data: Set[str]) -> List[Dict]:
     parsed = []
     for row in raw_data:
         try:
-            p = row.split(DELIMITER)
+            p = row.strip('"').split(DELIMITER)
             if len(p) < 11:
                 continue
             parsed.append({
@@ -542,7 +542,7 @@ def parse_scroll_data(raw_data: Set[str]) -> List[Dict]:
     parsed = []
     for row in raw_data:
         try:
-            p = row.split(DELIMITER)
+            p = row.strip('"').split(DELIMITER)
             if len(p) < 7:
                 continue
             parsed.append({
@@ -559,7 +559,7 @@ def parse_read_data(raw_data: Set[str]) -> List[Dict]:
     parsed = []
     for row in raw_data:
         try:
-            p = row.split(DELIMITER)
+            p = row.strip('"').split(DELIMITER)
             if len(p) < 8:
                 continue
             parsed.append({

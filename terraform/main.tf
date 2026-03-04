@@ -318,6 +318,7 @@ module "move_data_to_mysql" {
   create_security_group    = var.move_data_to_mysql.create_security_group
   rds_security_group_id    = var.move_data_to_mysql.rds_security_group_id
   smg_end_point_sg_id      = var.move_data_to_mysql.smg_end_point_sg_id
+  netty_redis_sg_id        = var.move_data_to_mysql.netty_redis_sg_id
   valkey_security_group_id = var.move_data_to_mysql.valkey_security_group_id
   valkey_port              = var.move_data_to_mysql.valkey_port
 

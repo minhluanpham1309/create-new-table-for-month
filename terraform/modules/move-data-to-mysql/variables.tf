@@ -172,3 +172,9 @@ variable "schedule_retry_policy" {
     maximum_retry_attempts       = 3
   }
 }
+
+variable "netty_redis_sg_id" {
+    description = "Security group ID for Netty Redis to allow Lambda access"
+    type        = string
+    default     = null
+}

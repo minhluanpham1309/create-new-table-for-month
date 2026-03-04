@@ -74,30 +74,31 @@ def mock_redis_client():
 
 @pytest.fixture
 def sample_pageview_data():
+    # Real Redis format: leading and trailing " wrapping the entire row string
     return {
-        "2024-01-15 10;-;ref123;-;https://example.com/page;-;url456;-;desktop;-;1920;-;192.168.1.1;-;Mozilla/5.0;-;utm_source=google&param1=value1;-;www.google.com;-;google;-;cpc",
-        "2024-01-15 11;-;ref124;-;https://example.com/page2;-;url457;-;mobile;-;375;-;192.168.1.2;-;Mobile Safari;-;;-;;-;;-;",
+        '"2024-01-15 10;-;ref123;-;https://example.com/page;-;url456;-;desktop;-;1920;-;192.168.1.1;-;Mozilla/5.0;-;utm_source=google&param1=value1;-;www.google.com;-;google;-;cpc"',
+        '"2024-01-15 11;-;ref124;-;https://example.com/page2;-;url457;-;mobile;-;375;-;192.168.1.2;-;Mobile Safari;-;;-;;-;;-;"',
     }
 
 
 @pytest.fixture
 def sample_click_data():
     return {
-        "2024-01-15 10;-;desktop;-;1920;-;1080;-;2400;-;ref123;-;150;-;250;-;https://example.com/link;-;Link Title;-;url456",
+        '"2024-01-15 10;-;desktop;-;1920;-;1080;-;2400;-;ref123;-;150;-;250;-;https://example.com/link;-;Link Title;-;url456"',
     }
 
 
 @pytest.fixture
 def sample_scroll_data():
     return {
-        "2024-01-15 10;-;desktop;-;1920;-;3000;-;ref123;-;50;-;url456",
+        '"2024-01-15 10;-;desktop;-;1920;-;3000;-;ref123;-;50;-;url456"',
     }
 
 
 @pytest.fixture
 def sample_read_data():
     return {
-        "2024-01-15 10;-;desktop;-;1920;-;1080;-;3000;-;ref123;-;75;-;url456",
+        '"2024-01-15 10;-;desktop;-;1920;-;1080;-;3000;-;ref123;-;75;-;url456"',
     }
 
 
@@ -324,7 +325,7 @@ class TestDataParsers:
 
     def test_parse_pageview_data_with_utm(self, mock_db_connection):
         conn, cursor = mock_db_connection
-        data = {"2024-01-15 10;-;ref123;-;https://example.com;-;url456;-;desktop;-;1920;-;192.168.1.1;-;Mozilla;-;param1=value1;-;google.com;-;newsletter;-;email"}
+        data = {'"2024-01-15 10;-;ref123;-;https://example.com;-;url456;-;desktop;-;1920;-;192.168.1.1;-;Mozilla;-;param1=value1;-;google.com;-;newsletter;-;email"'}
         with patch('lambda_function.get_id_cached', return_value=1):
             parsed, pairs = lambda_function.parse_pageview_data(data, conn)
         assert len(parsed) == 1
@@ -334,7 +335,7 @@ class TestDataParsers:
 
     def test_parse_pageview_data_malformed_row(self, mock_db_connection):
         conn, cursor = mock_db_connection
-        data = {'invalid;-;data'}
+        data = {'"invalid;-;data"'}
         parsed, pairs = lambda_function.parse_pageview_data(data, conn)
         assert len(parsed) == 0
 
@@ -345,7 +346,7 @@ class TestDataParsers:
         assert all('ypos' in item for item in result)
 
     def test_parse_click_data_malformed(self):
-        data = {'invalid;-;data'}
+        data = {'"invalid;-;data"'}
         result = lambda_function.parse_click_data(data)
         assert len(result) == 0
 
@@ -442,7 +443,7 @@ class TestDatabaseInsertHelpers:
 
     def test_insert_clicks_parse_to_insert_end_to_end(self, mock_db_connection):
         conn, cursor = mock_db_connection
-        raw = {"2024-01-15 10;-;desktop;-;1920;-;1080;-;2400;-;ref123;-;150;-;250;-;https://link.com;-;My Link;-;url456"}
+        raw = {'"2024-01-15 10;-;desktop;-;1920;-;1080;-;2400;-;ref123;-;150;-;250;-;https://link.com;-;My Link;-;url456"'}
         parsed = lambda_function.parse_click_data(raw)
         assert len(parsed) == 1
         lambda_function.insert_clicks(conn, 'site1', parsed, '202401')
@@ -713,7 +714,7 @@ class TestEdgeCases:
     def test_parse_pageview_with_long_ip(self, mock_db_connection):
         conn, cursor = mock_db_connection
         long_ip = "1" * 100
-        data = {f"2024-01-15 10;-;ref;-;url;-;urlid;-;desktop;-;1920;-;{long_ip};-;ua;-;;-;;-;;-;"}
+        data = {f'"2024-01-15 10;-;ref;-;url;-;urlid;-;desktop;-;1920;-;{long_ip};-;ua;-;;-;;-;;-;"'}
         with patch('lambda_function.get_id_cached', return_value=None):
             parsed, pairs = lambda_function.parse_pageview_data(data, conn)
         assert parsed[0]['ipA'] == '0.0.0.0'
@@ -1020,7 +1021,7 @@ class TestParseExceptionHandlers:
     def test_parse_pageview_data_exception_in_row(self, mock_db_connection):
         """Lines 777-778: exception while processing a pageview row is caught."""
         conn, _ = mock_db_connection
-        valid_row = "2024-01-15 10;-;ref;-;url;-;urlid;-;desktop;-;1920;-;1.1.1.1;-;ua;-;;-;;-;;-;"
+        valid_row = '"2024-01-15 10;-;ref;-;url;-;urlid;-;desktop;-;1920;-;1.1.1.1;-;ua;-;;-;;-;;-;"'
         with patch('lambda_function.extract_parameter_pairs', side_effect=Exception("Parse error")):
             parsed, pairs = lambda_function.parse_pageview_data({valid_row}, conn)
         assert len(parsed) == 0
@@ -1040,8 +1041,8 @@ class TestParseExceptionHandlers:
 
     def test_parse_scroll_data_short_row_skipped(self):
         """Line 807: 'continue' hit when scroll row has fewer than 7 fields."""
-        # Only 3 fields — triggers len(p) < 7 → continue
-        short_row = "f0;-;f1;-;f2"
+        # Only 3 fields after strip — triggers len(p) < 7 → continue
+        short_row = '"f0;-;f1;-;f2"'
         result = lambda_function.parse_scroll_data([short_row])
         assert result == []
 
@@ -1060,8 +1061,8 @@ class TestParseExceptionHandlers:
 
     def test_parse_read_data_short_row_skipped(self):
         """Line 824: 'continue' hit when read row has fewer than 8 fields."""
-        # Only 4 fields — triggers len(p) < 8 → continue
-        short_row = "f0;-;f1;-;f2;-;f3"
+        # Only 4 fields after strip — triggers len(p) < 8 → continue
+        short_row = '"f0;-;f1;-;f2;-;f3"'
         result = lambda_function.parse_read_data([short_row])
         assert result == []
 

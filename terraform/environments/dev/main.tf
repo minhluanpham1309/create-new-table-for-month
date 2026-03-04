@@ -315,6 +315,8 @@ module "heatmap_japan_dev" {
 
     # Secrets Manager End Point Security Group
     smg_end_point_sg_id = "sg-00ca8426775d6c9b3"
+    
+    netty_redis_sg_id = "sg-0e61332f35f4aae2d"
 
     # Valkey Security Group
     valkey_security_group_id = module.heatmap_japan_dev.valkey_security_group_id

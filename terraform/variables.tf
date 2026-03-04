@@ -372,6 +372,7 @@ variable "move_data_to_mysql" {
     create_security_group    = optional(bool, false)
     rds_security_group_id    = optional(string, null)
     smg_end_point_sg_id      = optional(string, null)
+    netty_redis_sg_id        = optional(string, null)
     valkey_security_group_id = optional(string, null)
     valkey_port              = optional(number, 6379)
 
