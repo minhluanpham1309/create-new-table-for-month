@@ -382,7 +382,7 @@ variable "move_data_to_mysql" {
     schedule_expression          = optional(string, "cron(0 2 * * ? *)")
     schedule_expression_timezone = optional(string, "Asia/Tokyo")
     schedule_enabled             = optional(bool, true)
-    schedule_input               = optional(any, null)
+    schedule_input               = optional(any, {"mode": "normal"})
 
     # Scheduler IAM Role (Auto-create if null)
     scheduler_inline_policies = optional(map(string), {})

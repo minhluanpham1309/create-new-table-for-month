@@ -152,7 +152,6 @@ variable "schedule_enabled" {
 variable "schedule_input" {
   description = "Optional input payload for the Lambda function"
   type        = any
-  default     = null
 }
 
 variable "scheduler_role_arn" {

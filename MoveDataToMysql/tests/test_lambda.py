@@ -1132,3 +1132,117 @@ class TestSaveParameterPairsZeroRetry:
 
         assert result is False
 
+
+# ===========================================================================
+# NEW TESTS — mode handling in lambda_handler and execute_move_data
+# ===========================================================================
+
+
+class TestLambdaHandlerModeHandling:
+    """Cover mode validation and propagation in lambda_handler (lines 63-67)."""
+
+    @patch('lambda_function.execute_move_data')
+    @patch('lambda_function.get_db_connection')
+    @patch('lambda_function.get_redis_client')
+    @patch('lambda_function.get_secret')
+    @patch('lambda_function.get_region')
+    def test_lambda_handler_mode_normal_explicit(
+            self, mock_region, mock_secret, mock_redis, mock_db, mock_execute):
+        """mode='normal' passed explicitly → forwarded as-is to execute_move_data."""
+        mock_region.return_value = 'ap-northeast-1'
+        mock_secret.return_value = {'host': 'test'}
+        mock_redis.return_value = Mock()
+        mock_conn = Mock()
+        mock_db.return_value = mock_conn
+        mock_execute.return_value = {'successful': 5, 'failed': 0}
+
+        result = lambda_function.lambda_handler(event={'mode': 'normal'})
+
+        assert result['statusCode'] == 200
+        mock_execute.assert_called_once()
+        _, kwargs = mock_execute.call_args
+        called_mode = mock_execute.call_args[0][2] if len(mock_execute.call_args[0]) > 2 else mock_execute.call_args[1].get('mode')
+        assert called_mode == 'normal'
+
+    @patch('lambda_function.execute_move_data')
+    @patch('lambda_function.get_db_connection')
+    @patch('lambda_function.get_redis_client')
+    @patch('lambda_function.get_secret')
+    @patch('lambda_function.get_region')
+    def test_lambda_handler_mode_miss(
+            self, mock_region, mock_secret, mock_redis, mock_db, mock_execute):
+        """mode='miss' passed → forwarded to execute_move_data unchanged."""
+        mock_region.return_value = 'ap-northeast-1'
+        mock_secret.return_value = {'host': 'test'}
+        mock_redis.return_value = Mock()
+        mock_conn = Mock()
+        mock_db.return_value = mock_conn
+        mock_execute.return_value = {'successful': 3, 'failed': 0}
+
+        result = lambda_function.lambda_handler(event={'mode': 'miss'})
+
+        assert result['statusCode'] == 200
+        called_mode = mock_execute.call_args[0][2] if len(mock_execute.call_args[0]) > 2 else mock_execute.call_args[1].get('mode')
+        assert called_mode == 'miss'
+
+    @patch('lambda_function.execute_move_data')
+    @patch('lambda_function.get_db_connection')
+    @patch('lambda_function.get_redis_client')
+    @patch('lambda_function.get_secret')
+    @patch('lambda_function.get_region')
+    def test_lambda_handler_unknown_mode_falls_back_to_normal(
+            self, mock_region, mock_secret, mock_redis, mock_db, mock_execute):
+        """Unknown mode → warning logged, mode falls back to 'normal' (lines 65-66)."""
+        mock_region.return_value = 'ap-northeast-1'
+        mock_secret.return_value = {'host': 'test'}
+        mock_redis.return_value = Mock()
+        mock_conn = Mock()
+        mock_db.return_value = mock_conn
+        mock_execute.return_value = {'successful': 0, 'failed': 0}
+
+        result = lambda_function.lambda_handler(event={'mode': 'invalid_mode'})
+
+        assert result['statusCode'] == 200
+        called_mode = mock_execute.call_args[0][2] if len(mock_execute.call_args[0]) > 2 else mock_execute.call_args[1].get('mode')
+        assert called_mode == 'normal'
+
+    @patch('lambda_function.execute_move_data')
+    @patch('lambda_function.get_db_connection')
+    @patch('lambda_function.get_redis_client')
+    @patch('lambda_function.get_secret')
+    @patch('lambda_function.get_region')
+    def test_lambda_handler_no_event_defaults_to_normal(
+            self, mock_region, mock_secret, mock_redis, mock_db, mock_execute):
+        """event=None → mode defaults to 'normal'."""
+        mock_region.return_value = 'ap-northeast-1'
+        mock_secret.return_value = {'host': 'test'}
+        mock_redis.return_value = Mock()
+        mock_conn = Mock()
+        mock_db.return_value = mock_conn
+        mock_execute.return_value = {'successful': 0, 'failed': 0}
+
+        lambda_function.lambda_handler(event=None)
+
+        called_mode = mock_execute.call_args[0][2] if len(mock_execute.call_args[0]) > 2 else mock_execute.call_args[1].get('mode')
+        assert called_mode == 'normal'
+
+    @patch('lambda_function.execute_move_data')
+    @patch('lambda_function.get_db_connection')
+    @patch('lambda_function.get_redis_client')
+    @patch('lambda_function.get_secret')
+    @patch('lambda_function.get_region')
+    def test_lambda_handler_empty_event_defaults_to_normal(
+            self, mock_region, mock_secret, mock_redis, mock_db, mock_execute):
+        """event={} (no 'mode' key) → mode defaults to 'normal'."""
+        mock_region.return_value = 'ap-northeast-1'
+        mock_secret.return_value = {'host': 'test'}
+        mock_redis.return_value = Mock()
+        mock_conn = Mock()
+        mock_db.return_value = mock_conn
+        mock_execute.return_value = {'successful': 0, 'failed': 0}
+
+        lambda_function.lambda_handler(event={})
+
+        called_mode = mock_execute.call_args[0][2] if len(mock_execute.call_args[0]) > 2 else mock_execute.call_args[1].get('mode')
+        assert called_mode == 'normal'
+
