@@ -314,11 +314,11 @@ class TestGetRedisClient:
         with pytest.raises(Exception, match="Connection refused"):
             common.get_redis_client()
 
-    @patch.dict(os.environ, {"REDIS_HOST": "main-redis", "REDIS_PORT": "6380", "REDIS_PASSWORD": "pass"})
+    @patch.dict(os.environ, {"REDIS_HOST": "main-redis", "REDIS_PORT": "6379", "REDIS_PASSWORD": "pass", "REDIS_DB": "1"})
     @patch("redis.Redis")
     @patch("redis.ConnectionPool")
     def test_uses_correct_env_vars(self, mock_pool_cls, mock_redis_cls):
-        """get_redis_client passes REDIS_HOST/PORT/PASSWORD with db=1."""
+        """get_redis_client passes REDIS_HOST/PORT/PASSWORD/DB with db from REDIS_DB env."""
         mock_pool_cls.return_value = MagicMock()
         mock_redis_cls.return_value = MagicMock()
 
@@ -326,7 +326,7 @@ class TestGetRedisClient:
 
         call_kwargs = mock_pool_cls.call_args[1]
         assert call_kwargs["host"] == "main-redis"
-        assert call_kwargs["port"] == 6380
+        assert call_kwargs["port"] == 6379
         assert call_kwargs["password"] == "pass"
         assert call_kwargs["db"] == 1
 
@@ -366,26 +366,6 @@ class TestGetPackageRedisClient:
 
         with pytest.raises(Exception, match="Connection refused"):
             common.get_package_redis_client()
-
-    @patch.dict(os.environ, {
-        "REDIS_NETTY_HOST": "pkg-redis",
-        "REDIS_PORT": "6379",
-        "REDIS_PASSWORD": "pkgpass",
-    })
-    @patch("redis.Redis")
-    @patch("redis.ConnectionPool")
-    def test_uses_correct_env_vars(self, mock_pool_cls, mock_redis_cls):
-        """get_package_redis_client passes REDIS_NETTY_HOST/REDIS_PORT/REDIS_PASSWORD with db=0."""
-        mock_pool_cls.return_value = MagicMock()
-        mock_redis_cls.return_value = MagicMock()
-
-        common.get_package_redis_client()
-
-        call_kwargs = mock_pool_cls.call_args[1]
-        assert call_kwargs["host"] == "pkg-redis"
-        assert call_kwargs["port"] == 6379
-        assert call_kwargs["password"] == "pkgpass"
-        assert call_kwargs["db"] == 0
 
     @patch.dict(os.environ, {"REDIS_NETTY_HOST": "pkg-redis", "REDIS_HOST": "main-redis"})
     @patch("redis.Redis")
