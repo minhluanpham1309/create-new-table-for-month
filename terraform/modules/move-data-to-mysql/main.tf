@@ -38,6 +38,19 @@ resource "aws_vpc_security_group_ingress_rule" "valkey_from_lambda" {
   depends_on = [module.lambda]
 }
 
+# Allow Lambda to access Redis on EC2 (Netty)
+resource "aws_vpc_security_group_ingress_rule" "redis_from_lambda" {
+  count                        = var.create_security_group && var.netty_redis_sg_id != null ? 1 : 0
+  security_group_id            = var.netty_redis_sg_id
+  from_port                    = 6379
+  to_port                      = 6379
+  ip_protocol                  = "tcp"
+  description                  = "Allow Lambda ${var.lambda_function_name} to access Redis on EC2 (Netty)"
+  referenced_security_group_id = module.lambda.security_group_id
+
+  depends_on = [module.lambda]
+}
+
 # EventBridge Scheduler (optional)
 module "schedule" {
   count  = var.schedule_name != null ? 1 : 0

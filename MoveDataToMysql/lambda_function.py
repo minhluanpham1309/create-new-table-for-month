@@ -49,10 +49,22 @@ def lambda_handler(event=None, context=None):
     """
     Triggered hourly by EventBridge.
     Moves analytics data from Redis to per-site MySQL schemas.
+
+    EventBridge input (optional):
+      {
+        "mode": "normal"   # process 1 hour ago  (default)
+        "mode": "miss"     # process 2 hours ago (re-process missed data)
+      }
     """
     logger.info("=" * 60)
     logger.info("START  MOVE DATA TO MYSQL")
     logger.info("=" * 60)
+
+    mode = (event or {}).get("mode", "normal")
+    if mode not in ("normal", "miss"):
+        logger.warning(f"Unknown mode '{mode}', falling back to 'normal'")
+        mode = "normal"
+    logger.info(f"mode: {mode}")
 
     region = get_region()
     secret = run_step("get_secret", get_secret, region)
@@ -62,7 +74,7 @@ def lambda_handler(event=None, context=None):
     cnx = run_step("open_db_connection", get_db_connection, secret)
 
     try:
-        stats = run_step("execute_move_data", execute_move_data, cnx, secret)
+        stats = run_step("execute_move_data", execute_move_data, cnx, secret, mode)
         cnx.commit()
 
         logger.info("=" * 60)
@@ -88,26 +100,30 @@ def lambda_handler(event=None, context=None):
 # MAIN LOGIC
 # ============================================================================
 
-def execute_move_data(coordinator_cnx: pymysql.connections.Connection, secret: Dict) -> Dict[str, Any]:
+def execute_move_data(coordinator_cnx: pymysql.connections.Connection, secret: Dict, mode: str = "normal") -> Dict[str, Any]:
     """
-    1. Determine target date key and table name (1 hour ago in JST).
-    2. Scan Redis for matching keys.
-    3. Load the active schema list.
-    4. Dispatch per-key work to a thread pool (each thread opens its own DB connection).
+    Determine target keys and table name based on mode, then move data to MySQL.
+
+    mode="normal" (default — regular hourly run):
+      - Scans Redis for keys matching 1 hour ago (YYYY-MM-DD HH pattern).
+      - date_key  = 1 hour ago formatted as PATTERN_YYYY_MM_DD_HH
+      - table_name = 1 hour ago formatted as PATTERN_YYYYMM
     """
-    now_jst      = datetime.now(JST)
-    one_hour_ago = now_jst - timedelta(hours=1)
-    date_key     = one_hour_ago.strftime(PATTERN_YYYY_MM_DD_HH)
-    table_name   = one_hour_ago.strftime(PATTERN_YYYYMM)
+    now_jst = datetime.now(JST)
+    
+    if mode == "normal" or mode == "":  # normal
+        one_hour_ago_dt = now_jst - timedelta(hours=1)
+        date_key        = one_hour_ago_dt.strftime(PATTERN_YYYY_MM_DD_HH)
+        table_name      = one_hour_ago_dt.strftime(PATTERN_YYYYMM)
 
-    logger.info(f"date_key  : {date_key}")
-    logger.info(f"table_name: {table_name}")
+        logger.info(f"date_key  : {date_key}")
+        logger.info(f"table_name: {table_name}")
 
-    all_keys      = scan_redis_keys(f"*{date_key}*")
-    filtered_keys = [k for k in all_keys if CHUNK_INDEX_TRACKING_DATA_KEY not in k]
+        all_keys      = scan_redis_keys(f"*{date_key}*")
+        filtered_keys = [k for k in all_keys if CHUNK_INDEX_TRACKING_DATA_KEY not in k]
 
-    logger.info(f"Total keys found  : {len(all_keys)}")
-    logger.info(f"Keys after filter : {len(filtered_keys)}")
+        logger.info(f"Total keys found  : {len(all_keys)}")
+        logger.info(f"Keys after filter : {len(filtered_keys)}")
 
     if not filtered_keys:
         return {"date_key": date_key, "table_name": table_name,
@@ -469,7 +485,7 @@ def parse_pageview_data(
 
     for row in raw_data:
         try:
-            p = row.split(DELIMITER)
+            p = row.strip('"').split(DELIMITER)
             if len(p) < 3:
                 continue
 
@@ -524,7 +540,7 @@ def parse_click_data(raw_data: Set[str]) -> List[Dict]:
     parsed = []
     for row in raw_data:
         try:
-            p = row.split(DELIMITER)
+            p = row.strip('"').split(DELIMITER)
             if len(p) < 11:
                 continue
             parsed.append({
@@ -542,7 +558,7 @@ def parse_scroll_data(raw_data: Set[str]) -> List[Dict]:
     parsed = []
     for row in raw_data:
         try:
-            p = row.split(DELIMITER)
+            p = row.strip('"').split(DELIMITER)
             if len(p) < 7:
                 continue
             parsed.append({
@@ -559,7 +575,7 @@ def parse_read_data(raw_data: Set[str]) -> List[Dict]:
     parsed = []
     for row in raw_data:
         try:
-            p = row.split(DELIMITER)
+            p = row.strip('"').split(DELIMITER)
             if len(p) < 8:
                 continue
             parsed.append({

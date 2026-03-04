@@ -152,7 +152,6 @@ variable "schedule_enabled" {
 variable "schedule_input" {
   description = "Optional input payload for the Lambda function"
   type        = any
-  default     = null
 }
 
 variable "scheduler_role_arn" {
@@ -171,4 +170,10 @@ variable "schedule_retry_policy" {
     maximum_event_age_in_seconds = 900
     maximum_retry_attempts       = 3
   }
+}
+
+variable "netty_redis_sg_id" {
+    description = "Security group ID for Netty Redis to allow Lambda access"
+    type        = string
+    default     = null
 }

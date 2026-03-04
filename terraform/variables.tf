@@ -372,6 +372,7 @@ variable "move_data_to_mysql" {
     create_security_group    = optional(bool, false)
     rds_security_group_id    = optional(string, null)
     smg_end_point_sg_id      = optional(string, null)
+    netty_redis_sg_id        = optional(string, null)
     valkey_security_group_id = optional(string, null)
     valkey_port              = optional(number, 6379)
 
@@ -381,7 +382,7 @@ variable "move_data_to_mysql" {
     schedule_expression          = optional(string, "cron(0 2 * * ? *)")
     schedule_expression_timezone = optional(string, "Asia/Tokyo")
     schedule_enabled             = optional(bool, true)
-    schedule_input               = optional(any, null)
+    schedule_input               = optional(any, {"mode": "normal"})
 
     # Scheduler IAM Role (Auto-create if null)
     scheduler_inline_policies = optional(map(string), {})
