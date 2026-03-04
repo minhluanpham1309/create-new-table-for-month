@@ -95,7 +95,7 @@ module "heatmap_japan_dev" {
   # Network configuration - existing VPC
   vpc_id                     = "vpc-08586cd9f6ce3a905"
   subnet_ids                 = ["subnet-0ffa21d23c30bbf14", "subnet-09e78cbbf83798d9a", "subnet-0071f6115ba604b19"]
-  allowed_security_group_ids = ["sg-01bac204cde449aee", "sg-06addf3041186f839", "sg-03b92aa686c2d348d"]
+  allowed_security_group_ids = ["sg-01bac204cde449aee", "sg-06addf3041186f839", "sg-03b92aa686c2d348d", "sg-0ee99d4148e0e9d73"]
   
   # Valkey - Disable Terraform management (managed manually on AWS)
   enable_valkey = true
@@ -291,7 +291,7 @@ module "heatmap_japan_dev" {
     lambda_environment_variables = {
       RDS_SECRET_NAME = "rds/db-test-private"
       REDIS_HOST      = module.heatmap_japan_dev.valkey_endpoint
-      REDIS_NETTY_HOST = 172.31.16.248
+      REDIS_NETTY_HOST = "172.31.16.248"
       REDIS_PORT      = "6379"
       REDIS_DB        = "1"
       REDIS_NETTY_DB  = "0"
@@ -306,7 +306,7 @@ module "heatmap_japan_dev" {
     create_security_group = true
     vpc_config = {
       vpc_id             = "vpc-08586cd9f6ce3a905"
-      subnet_ids         = ["subnet-0ffa21d23c30bbf14", "subnet-09e78cbbf83798d9a", "subnet-0071f6115ba604b19"]
+      subnet_ids         = ["subnet-0ffa21d23c30bbf14", "subnet-09e78cbbf83798d9a", "subnet-0071f6115ba604b19", "subnet-05a0ae0ddd174baba"]
       security_group_ids = []
     }
 

@@ -390,9 +390,74 @@ class TestDatabaseInsertHelpers:
 
     def test_insert_clicks_success(self, mock_db_connection):
         conn, cursor = mock_db_connection
-        data = [{'dateCreate': '2024-01-15 10', 'device': 'desktop', 'winWidth': '1920', 'docWidth': '1080', 'docHeight': '2400', 'referrerId': 'ref123', 'xpos': '150', 'ypos': '250', 'link': 'https://example.com/link', 'title': 'Link Title', 'urlId': 'url456'}]
+        data = [{
+            'dateCreate': '2024-01-15 10', 'xpos': '150',  'ypos': '250',
+            'winWidth':   '1920',          'docWidth': '1080', 'docHeight': '2400',
+            'device':     'desktop',       'referrerId': 'ref123',
+            'urlId':      'url456',        'link': 'https://example.com/link',
+            'title':      'Link Title',
+        }]
         result = lambda_function.insert_clicks(conn, 'site1', data, '202401')
         assert result is True
+
+    def test_insert_clicks_sql_has_11_columns(self, mock_db_connection):
+        conn, cursor = mock_db_connection
+        data = [{
+            'dateCreate': '2024-01-15 10', 'xpos': '150',  'ypos': '250',
+            'winWidth':   '1920',          'docWidth': '1080', 'docHeight': '2400',
+            'device':     'desktop',       'referrerId': 'ref123',
+            'urlId':      'url456',        'link': 'https://link.com', 'title': 'T',
+        }]
+        lambda_function.insert_clicks(conn, 'site1', data, '202401')
+        sql = cursor.execute.call_args[0][0]
+        assert sql.count('%s') == 11
+        for col in ('date_added', 'xpos', 'ypos', 'win_width', 'doc_width',
+                    'doc_height', 'device', 'referrer_id', 'url_id', 'link', 'title'):
+            assert col in sql
+
+    def test_insert_clicks_tuple_order_matches_sql_columns(self, mock_db_connection):
+        conn, cursor = mock_db_connection
+        data = [{
+            'dateCreate': 'D', 'xpos': 'X', 'ypos': 'Y',
+            'winWidth':   'WW', 'docWidth': 'DW', 'docHeight': 'DH',
+            'device':     'DEV', 'referrerId': 'REF',
+            'urlId':      'UID', 'link': 'LNK', 'title': 'TTL',
+        }]
+        lambda_function.insert_clicks(conn, 'site1', data, '202401')
+        params = cursor.execute.call_args[0][1]
+        assert params == ('D', 'X', 'Y', 'WW', 'DW', 'DH', 'DEV', 'REF', 'UID', 'LNK', 'TTL')
+
+    def test_insert_clicks_uses_correct_table_name(self, mock_db_connection):
+        conn, cursor = mock_db_connection
+        data = [{
+            'dateCreate': 'D', 'xpos': '1', 'ypos': '2',
+            'winWidth': '3', 'docWidth': '4', 'docHeight': '5',
+            'device': 'mobile', 'referrerId': 'r', 'urlId': 'u',
+            'link': 'l', 'title': 't',
+        }]
+        lambda_function.insert_clicks(conn, 'mysite', data, '202606')
+        sql = cursor.execute.call_args[0][0]
+        assert '`mysite`' in sql
+        assert '`202606_click`' in sql
+
+    def test_insert_clicks_parse_to_insert_end_to_end(self, mock_db_connection):
+        conn, cursor = mock_db_connection
+        raw = {"2024-01-15 10;-;desktop;-;1920;-;1080;-;2400;-;ref123;-;150;-;250;-;https://link.com;-;My Link;-;url456"}
+        parsed = lambda_function.parse_click_data(raw)
+        assert len(parsed) == 1
+        lambda_function.insert_clicks(conn, 'site1', parsed, '202401')
+        params = cursor.execute.call_args[0][1]
+        assert params[0] == '2024-01-15 10'   # date_added ← dateCreate
+        assert params[1] == '150'              # xpos
+        assert params[2] == '250'              # ypos
+        assert params[3] == '1920'             # win_width ← winWidth
+        assert params[4] == '1080'             # doc_width ← docWidth
+        assert params[5] == '2400'             # doc_height ← docHeight
+        assert params[6] == 'desktop'          # device
+        assert params[7] == 'ref123'           # referrer_id ← referrerId
+        assert params[8] == 'url456'           # url_id ← urlId
+        assert params[9] == 'https://link.com' # link
+        assert params[10] == 'My Link'         # title
 
     def test_insert_scrolls_success(self, mock_db_connection):
         conn, cursor = mock_db_connection

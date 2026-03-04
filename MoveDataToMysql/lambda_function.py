@@ -721,16 +721,15 @@ def insert_clicks(connection, site_id: str, data: List[Dict], table_name: str) -
     table = f"`{site_id}`.`{table_name}_click`"
     sql   = (
         f"INSERT INTO {table} "
-        "(date_added, device, win_width, doc_width, doc_height, referrer_id, "
-        "x_pos, y_pos, link, title, url_id) "
+        "(date_added, xpos, ypos, win_width, doc_width, doc_height, device, referrer_id, url_id, link, title) "
         "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
     )
     rows = [
         (
-            item.get("dateCreate"), item.get("device"),    item.get("winWidth"),
-            item.get("docWidth"),   item.get("docHeight"), item.get("referrerId"),
-            item.get("xpos"),       item.get("ypos"),      item.get("link"),
-            item.get("title"),      item.get("urlId"),
+            item.get("dateCreate"),  item.get("xpos"),       item.get("ypos"),
+            item.get("winWidth"),    item.get("docWidth"),   item.get("docHeight"),
+            item.get("device"),      item.get("referrerId"), item.get("urlId"),
+            item.get("link"),        item.get("title"),
         )
         for item in data
     ]
