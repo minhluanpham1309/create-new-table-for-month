@@ -2,6 +2,7 @@ import json
 import logging
 import pymysql
 import hashlib
+import threading
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Optional, Any, Set, Tuple
@@ -22,7 +23,6 @@ from common import (
     get_package_redis_client,
     get_region,
     get_secret,
-    get_ssl_context,
     get_db_connection,
     run_step,
     scan_redis_keys,
@@ -41,6 +41,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_thread_local = threading.local()
+
 # ============================================================================
 # LAMBDA HANDLER
 # ============================================================================
@@ -49,22 +51,10 @@ def lambda_handler(event=None, context=None):
     """
     Triggered hourly by EventBridge.
     Moves analytics data from Redis to per-site MySQL schemas.
-
-    EventBridge input (optional):
-      {
-        "mode": "normal"   # process 1 hour ago  (default)
-        "mode": "miss"     # process 2 hours ago (re-process missed data)
-      }
     """
     logger.info("=" * 60)
     logger.info("START  MOVE DATA TO MYSQL")
     logger.info("=" * 60)
-
-    mode = (event or {}).get("mode", "normal")
-    if mode not in ("normal", "miss"):
-        logger.warning(f"Unknown mode '{mode}', falling back to 'normal'")
-        mode = "normal"
-    logger.info(f"mode: {mode}")
 
     region = get_region()
     secret = run_step("get_secret", get_secret, region)
@@ -74,8 +64,7 @@ def lambda_handler(event=None, context=None):
     cnx = run_step("open_db_connection", get_db_connection, secret)
 
     try:
-        stats = run_step("execute_move_data", execute_move_data, cnx, secret, mode)
-        cnx.commit()
+        stats = run_step("execute_move_data", execute_move_data, cnx, secret)
 
         logger.info("=" * 60)
         logger.info("END  MOVE DATA TO MYSQL")
@@ -100,7 +89,7 @@ def lambda_handler(event=None, context=None):
 # MAIN LOGIC
 # ============================================================================
 
-def execute_move_data(coordinator_cnx: pymysql.connections.Connection, secret: Dict, mode: str = "normal") -> Dict[str, Any]:
+def execute_move_data(coordinator_cnx: pymysql.connections.Connection, secret: Dict) -> Dict[str, Any]:
     """
     Determine target keys and table name based on mode, then move data to MySQL.
 
@@ -110,20 +99,19 @@ def execute_move_data(coordinator_cnx: pymysql.connections.Connection, secret: D
       - table_name = 1 hour ago formatted as PATTERN_YYYYMM
     """
     now_jst = datetime.now(JST)
-    
-    if mode == "normal" or mode == "":  # normal
-        one_hour_ago_dt = now_jst - timedelta(hours=1)
-        date_key        = one_hour_ago_dt.strftime(PATTERN_YYYY_MM_DD_HH)
-        table_name      = one_hour_ago_dt.strftime(PATTERN_YYYYMM)
 
-        logger.info(f"date_key  : {date_key}")
-        logger.info(f"table_name: {table_name}")
+    one_hour_ago_dt = now_jst - timedelta(hours=1)
+    date_key        = one_hour_ago_dt.strftime(PATTERN_YYYY_MM_DD_HH)
+    table_name      = one_hour_ago_dt.strftime(PATTERN_YYYYMM)
 
-        all_keys      = scan_redis_keys(f"*{date_key}*")
-        filtered_keys = [k for k in all_keys if CHUNK_INDEX_TRACKING_DATA_KEY not in k]
+    logger.info(f"date_key  : {date_key}")
+    logger.info(f"table_name: {table_name}")
 
-        logger.info(f"Total keys found  : {len(all_keys)}")
-        logger.info(f"Keys after filter : {len(filtered_keys)}")
+    all_keys      = scan_redis_keys(f"*{date_key}*")
+    filtered_keys = [k for k in all_keys if CHUNK_INDEX_TRACKING_DATA_KEY not in k]
+
+    logger.info(f"Total keys found  : {len(all_keys)}")
+    logger.info(f"Keys after filter : {len(filtered_keys)}")
 
     if not filtered_keys:
         return {"date_key": date_key, "table_name": table_name,
@@ -155,18 +143,26 @@ def get_schema_set(connection: pymysql.connections.Connection) -> Set[str]:
     return {row["SCHEMA_NAME"] for row in rows}
 
 
-def check_schema_exists(connection: pymysql.connections.Connection, site_id: str) -> bool:
-    with connection.cursor() as cur:
-        cur.execute(
-            "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = %s",
-            (site_id,),
-        )
-        return cur.fetchone() is not None
-
-
 # ============================================================================
 # PARALLEL KEY PROCESSING
 # ============================================================================
+
+def _thread_init(secret: Dict, connections: list, lock: threading.Lock):
+    """
+    Runs exactly once when a worker thread starts.
+    Opens a DB connection, stores it in thread-local storage, and registers
+    it in the shared `connections` list so the coordinator can close it after
+    the pool exits.
+    """
+    conn = get_db_connection(secret)
+    _thread_local.conn = conn
+    _thread_local.domain_cache  = {}  
+    _thread_local.utm_src_cache = {}
+    _thread_local.utm_med_cache = {}
+    with lock:
+        connections.append(conn)
+    logger.info(f"Thread {threading.current_thread().name}: DB connection opened")
+
 
 def process_keys_parallel(
     keys: List[str],
@@ -175,18 +171,26 @@ def process_keys_parallel(
     secret: Dict,
 ) -> Dict[str, int]:
     """
-    Each worker thread:
-      - opens its own DB connection (avoids shared-state issues)
-      - processes one Redis key
-      - closes its connection on completion
+    Each worker thread reuses a single DB connection (opened once in _thread_init)
+    for all keys it handles.  Connections are closed after the pool is joined.
     """
-    successful = 0
-    failed     = 0
+    successful  = 0
+    failed      = 0
+    # FIX 3: track connections opened by threads so we can close them after the
+    # pool exits — the old "cleanup_pool" approach was wrong because it created
+    # brand-new threads (with brand-new connections) and closed those instead.
+    connections : List[pymysql.connections.Connection] = []
+    lock        = threading.Lock()
 
-    with ThreadPoolExecutor(max_workers=get_max_workers()) as pool:
+    with ThreadPoolExecutor(
+        max_workers=get_max_workers(),
+        initializer=_thread_init,
+        initargs=(secret, connections, lock),
+    ) as pool:
         future_map: Dict[Any, str] = {}
 
         for key in keys:
+            # Key format: {site_id}_{YYYY-MM-DD HH}_{type_key}:{chunk_idx}
             parts = key.split("_")
             if len(parts) < 3:
                 logger.warning(f"Skipping malformed key: {key}")
@@ -200,7 +204,8 @@ def process_keys_parallel(
                 delete_redis_key(key)
                 continue
 
-            future = pool.submit(process_single_key, key, site_id, type_key, table_name, secret)
+            # FIX 4: removed redundant secret + schema_set args from process_single_key
+            future = pool.submit(process_single_key, key, site_id, type_key, table_name)
             future_map[future] = key
 
         for future in as_completed(future_map):
@@ -215,30 +220,27 @@ def process_keys_parallel(
                 logger.exception(f"Unhandled exception for key: {key}")
                 failed += 1
 
+    # Pool has joined — all threads finished; now close their connections
+    for conn in connections:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    logger.info(f"Closed {len(connections)} thread DB connections")
     logger.info(f"Parallel processing done — success={successful}  failed={failed}")
     return {"successful": successful, "failed": failed}
 
 
+# FIX 4 cont.: removed unused `secret` and `schema_set` params
 def process_single_key(
     redis_key: str,
     site_id: str,
     type_key: str,
     table_name: str,
-    secret: Dict,
 ) -> bool:
-    """
-    Worker function executed inside a thread.
-    Opens a dedicated DB connection, processes the key, then closes the connection.
-    """
-    connection: Optional[pymysql.connections.Connection] = None
+    """Worker: reuses the thread-local DB connection opened in _thread_init."""
     try:
-        connection = get_db_connection(secret)
-
-        # Re-verify schema exists (handles race condition where schema was dropped)
-        if not check_schema_exists(connection, site_id):
-            logger.info(f"Schema missing for site {site_id} — deleting key")
-            delete_redis_key(redis_key)
-            return False
+        connection = _thread_local.conn
 
         dispatch = {
             "v": process_pageview,
@@ -255,14 +257,11 @@ def process_single_key(
 
     except Exception:
         logger.exception(f"Error in worker for key: {redis_key}")
+        try:
+            _thread_local.conn.rollback()
+        except Exception:
+            pass
         return False
-
-    finally:
-        if connection:
-            try:
-                connection.close()
-            except Exception:
-                pass
 
 
 # ============================================================================
@@ -329,12 +328,13 @@ def _upsert_referrer_domain(connection, domain: str) -> Optional[int]:
         dtype = resolve_domain_type(domain)
         with connection.cursor() as cur:
             cur.execute(
-                "INSERT INTO REFERRER_DOMAIN (DOMAIN, TYPE) VALUES (%s, %s) "
+                "INSERT INTO HEAT_MAP.REFERRER_DOMAIN (DOMAIN, TYPE) VALUES (%s, %s) "
                 "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)",
                 (domain, dtype.name),
             )
-            connection.commit()
-            return cur.lastrowid
+            row_id = cur.lastrowid
+        connection.commit()
+        return row_id
     except Exception:
         logger.exception(f"Upsert REFERRER_DOMAIN failed: {domain}")
         connection.rollback()
@@ -345,12 +345,13 @@ def _upsert_utm_source(connection, utm_source: str) -> Optional[int]:
     try:
         with connection.cursor() as cur:
             cur.execute(
-                "INSERT INTO REFERRER_UTM_SOURCE (UTM_SOURCE) VALUES (%s) "
+                "INSERT INTO HEAT_MAP.REFERRER_UTM_SOURCE (UTM_SOURCE) VALUES (%s) "
                 "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)",
                 (utm_source,),
             )
-            connection.commit()
-            return cur.lastrowid
+            row_id = cur.lastrowid
+        connection.commit()
+        return row_id
     except Exception:
         logger.exception(f"Upsert REFERRER_UTM_SOURCE failed: {utm_source}")
         connection.rollback()
@@ -361,12 +362,13 @@ def _upsert_utm_medium(connection, utm_medium: str) -> Optional[int]:
     try:
         with connection.cursor() as cur:
             cur.execute(
-                "INSERT INTO REFERRER_UTM_MEDIUM (UTM_MEDIUM) VALUES (%s) "
+                "INSERT INTO HEAT_MAP.REFERRER_UTM_MEDIUM (UTM_MEDIUM) VALUES (%s) "
                 "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)",
                 (utm_medium,),
             )
-            connection.commit()
-            return cur.lastrowid
+            row_id = cur.lastrowid
+        connection.commit()
+        return row_id
     except Exception:
         logger.exception(f"Upsert REFERRER_UTM_MEDIUM failed: {utm_medium}")
         connection.rollback()
@@ -429,13 +431,13 @@ def save_parameter_pairs(
             with connection.cursor() as cur:
                 for pair in parameter_pairs:
                     cur.execute(
-                        "INSERT INTO PARAMETER_PAIR (ID, `KEY`, `VALUE`) VALUES (%s, %s, %s) "
+                        "INSERT INTO HEAT_MAP.PARAMETER_PAIR (ID, `KEY`, `VALUE`) VALUES (%s, %s, %s) "
                         "ON DUPLICATE KEY UPDATE `KEY` = `KEY`, `VALUE` = `VALUE`",
                         (pair["id"], pair["key"], pair["value"]),
                     )
                 for pair in parameter_pairs:
                     cur.execute(
-                        "INSERT INTO PARAMETER_PAIR_GROUP (ID, PARAMETER_PAIR_ID) VALUES (%s, %s) "
+                        "INSERT INTO HEAT_MAP.PARAMETER_PAIR_GROUP (ID, PARAMETER_PAIR_ID) VALUES (%s, %s) "
                         "ON DUPLICATE KEY UPDATE ID = ID",
                         (group_id, pair["id"]),
                     )
@@ -469,6 +471,9 @@ def save_parameter_pairs(
 def parse_pageview_data(
     raw_data: Set[str],
     connection: pymysql.connections.Connection,
+    domain_cache:  Dict[str, Optional[int]],
+    utm_src_cache: Dict[str, Optional[int]],
+    utm_med_cache: Dict[str, Optional[int]],
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Format:
@@ -479,9 +484,6 @@ def parse_pageview_data(
     """
     parsed           = []
     all_pairs        = []
-    domain_cache     : Dict[str, Optional[int]] = {}
-    utm_src_cache    : Dict[str, Optional[int]] = {}
-    utm_med_cache    : Dict[str, Optional[int]] = {}
 
     for row in raw_data:
         try:
@@ -603,14 +605,14 @@ def _load_and_process(
     """
     raw = get_redis_set_data(redis_key)
     if not raw:
+        logger.debug(f"No data in Redis key {redis_key} — skipping and deleting")
         delete_redis_key(redis_key)
         return True
 
-    result     = parse_fn(raw, *extra_parse_args)
-    pairs      = None
-    parsed     = result
+    result = parse_fn(raw, *extra_parse_args)
+    pairs  = None
+    parsed = result
 
-    # parse_pageview_data returns a tuple
     if isinstance(result, tuple):
         parsed, pairs = result
 
@@ -622,7 +624,7 @@ def _load_and_process(
     if not ok:
         return False
 
-    # Pageview extras
+    # Pageview extras (store_total_pv + parameter_pairs) — non-fatal failures
     if pairs is not None:
         try:
             pv_ok = store_total_pv(connection, site_id, table_name, len(parsed))
@@ -636,11 +638,11 @@ def _load_and_process(
             pair_ok = save_parameter_pairs(connection, unique_pairs)
             if not pair_ok:
                 logger.warning(f"save_parameter_pairs failed for site {site_id}")
-                ok = False
+                return False
 
-    if ok:
-        delete_redis_key(redis_key)
-    return ok
+    # Always delete the key once the main insert succeeded
+    delete_redis_key(redis_key)
+    return True
 
 
 def process_pageview(connection, redis_key: str, site_id: str, table_name: str) -> bool:
@@ -648,7 +650,12 @@ def process_pageview(connection, redis_key: str, site_id: str, table_name: str) 
         connection, redis_key, site_id, table_name,
         parse_fn=parse_pageview_data,
         insert_fn=insert_pageviews,
-        extra_parse_args=(connection,),
+        extra_parse_args=(
+            connection,
+            _thread_local.domain_cache,
+            _thread_local.utm_src_cache,
+            _thread_local.utm_med_cache,
+        ),
     )
 
 
@@ -692,10 +699,9 @@ def _execute_batch(
     """
     try:
         with connection.cursor() as cur:
-            for i, values in enumerate(rows, 1):
-                cur.execute(sql, values)
-                if i % BATCH_SIZE == 0 or i == len(rows):
-                    connection.commit()
+            for i in range(0, len(rows), BATCH_SIZE):
+                cur.executemany(sql, rows[i:i + BATCH_SIZE])
+        connection.commit()
         logger.info(f"Inserted {len(rows)} {label} records")
         return True
 
