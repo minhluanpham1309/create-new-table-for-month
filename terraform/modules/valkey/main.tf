@@ -35,8 +35,12 @@ resource "aws_vpc_security_group_ingress_rule" "valkey_from_allowed" {
   from_port                    = var.port
   to_port                      = var.port
   ip_protocol                  = "tcp"
-  description                  = "Valkey port access from allowed security group"
+  description                  = "Valkey port access from EC2 instances only"
   referenced_security_group_id = each.value
+
+  lifecycle {
+    ignore_changes = [tags_all]
+  }
 }
 
 resource "aws_vpc_security_group_egress_rule" "valkey_egress_all" {
@@ -44,6 +48,10 @@ resource "aws_vpc_security_group_egress_rule" "valkey_egress_all" {
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
   description       = "All outbound traffic"
+
+  lifecycle {
+    ignore_changes = [tags_all]
+  }
 }
 
 # Using default parameter group for simplicity
