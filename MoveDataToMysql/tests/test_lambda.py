@@ -218,6 +218,66 @@ class TestDomainUtmCaching:
         assert result == 99
         mock_set_cache.assert_called_once()
 
+    @patch('lambda_function.set_to_valkey_cache')
+    @patch('lambda_function.get_from_valkey_cache')
+    def test_get_id_cached_uses_cache_field_as_valkey_key(self, mock_get_cache, mock_set_cache, mock_db_connection):
+        """value (quoted string) is used as the Valkey hash field,
+        and the stripped form is passed to DB upsert."""
+        conn, cursor = mock_db_connection
+        mock_get_cache.return_value = None
+        cursor.lastrowid = 7
+
+        result = lambda_function.get_id_cached(
+            conn, lambda_function.CacheType.DOMAIN,
+            value='"mktran76.github.io"',
+        )
+
+        assert result == 7
+        # Valkey read uses the value as-is
+        mock_get_cache.assert_called_once_with(
+            lambda_function.CACHE_DOMAIN, '"mktran76.github.io"'
+        )
+        # Valkey write uses json.dumps(value) as the field
+        mock_set_cache.assert_called_once_with(
+            lambda_function.CACHE_DOMAIN, json.dumps('"mktran76.github.io"'), 7
+        )
+        # DB receives the stripped value
+        executed_sql = cursor.execute.call_args[0][0]
+        assert 'REFERRER_DOMAIN' in executed_sql
+
+    @patch('lambda_function.set_to_valkey_cache')
+    @patch('lambda_function.get_from_valkey_cache')
+    def test_get_id_cached_cache_field_defaults_to_value(self, mock_get_cache, mock_set_cache, mock_db_connection):
+        """When cache_field is not provided, value is used as the Valkey hash field."""
+        conn, cursor = mock_db_connection
+        mock_get_cache.return_value = None
+        cursor.lastrowid = 5
+
+        lambda_function.get_id_cached(
+            conn, lambda_function.CacheType.UTM_SOURCE, 'google'
+        )
+
+        mock_get_cache.assert_called_once_with(lambda_function.CACHE_UTM_SOURCE, 'google')
+        mock_set_cache.assert_called_once_with(lambda_function.CACHE_UTM_SOURCE, json.dumps('google'), 5)
+
+    @patch('lambda_function.set_to_valkey_cache')
+    @patch('lambda_function.get_from_valkey_cache')
+    def test_get_id_cached_hit_with_quoted_cache_field(self, mock_get_cache, mock_set_cache, mock_db_connection):
+        """Cache hit with quoted value — returns cached id, no DB call."""
+        conn, cursor = mock_db_connection
+        mock_get_cache.return_value = 16  # simulates '"mktran76.github.io"' : 16
+
+        result = lambda_function.get_id_cached(
+            conn, lambda_function.CacheType.DOMAIN,
+            value='"mktran76.github.io"',
+        )
+
+        assert result == 16
+        mock_set_cache.assert_not_called()  # no write on hit
+        mock_get_cache.assert_called_once_with(
+            lambda_function.CACHE_DOMAIN, '"mktran76.github.io"'
+        )
+
     def test_get_id_cached_empty_value(self, mock_db_connection):
         conn, cursor = mock_db_connection
         result = lambda_function.get_id_cached(conn, lambda_function.CacheType.DOMAIN, '')
@@ -346,28 +406,31 @@ class TestDataParsers:
         assert parsed[0]['refUtmMediumId'] == 1
 
     def test_parse_pageview_data_quoted_domain_and_utm(self, mock_db_connection):
-        """Fields wrapped in extra quotes — "mktran76.github.io" — the cache key keeps
-        the original quoted string, but get_id_cached receives the stripped value."""
+        """Fields wrapped in extra quotes — "mktran76.github.io" :
+        parse_pageview_data passes the original value (with quotes) to get_id_cached.
+        get_id_cached itself strips quotes before sending to DB."""
         conn, cursor = mock_db_connection
-        data = {'"2026-03-09 10;-;ref1;-;https://mktran76.github.io/;-;urlA;-;desktop;-;1920;-;1.2.3.4;-;Chrome;-;;-;"mktran76.github.io";-;"google";-;"cpc"'}
-        domain_cache, utm_src_cache, utm_med_cache = {}, {}, {}
+        # trailing ;-; prevents outer strip('"') from eating the closing " of "cpc"
+        data = {'"2026-03-09 10;-;ref1;-;https://mktran76.github.io/;-;urlA;-;desktop;-;1920;-;1.2.3.4;-;Chrome;-;;-;"mktran76.github.io";-;"google";-;"cpc";-;"'}
 
-        captured = {}
+        captured_value = {}
+
         def fake_get_id_cached(conn, cache_type, value):
-            captured[cache_type.value] = value
+            captured_value[cache_type.value] = value
             return 99
 
+        domain_cache, utm_src_cache, utm_med_cache = {}, {}, {}
         with patch('lambda_function.get_id_cached', side_effect=fake_get_id_cached):
             parsed, _ = lambda_function.parse_pageview_data(
                 data, conn, domain_cache, utm_src_cache, utm_med_cache
             )
 
         assert len(parsed) == 1
-        # Value passed to DB upsert must be stripped (no quotes)
-        assert captured['domain']     == 'mktran76.github.io'
-        assert captured['utm_source'] == 'google'
-        assert captured['utm_medium'] == 'cpc'
-        # IDs are correctly set on the dto
+        # parse_pageview_data passes the raw (quoted) value; get_id_cached strips internally
+        assert captured_value['domain']     == '"mktran76.github.io"'
+        assert captured_value['utm_source'] == '"google"'
+        assert captured_value['utm_medium'] == '"cpc"'
+        # IDs are set correctly
         assert parsed[0]['refDomainId']    == 99
         assert parsed[0]['refUtmSourceId'] == 99
         assert parsed[0]['refUtmMediumId'] == 99
@@ -381,7 +444,7 @@ class TestDataParsers:
         domain_cache, utm_src_cache, utm_med_cache = {}, {}, {}
 
         call_count = {'n': 0}
-        def fake_get_id_cached(conn, cache_type, value):
+        def fake_get_id_cached(conn, cache_type, value, cache_field=None):
             call_count['n'] += 1
             return 7
 
