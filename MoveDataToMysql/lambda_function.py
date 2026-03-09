@@ -305,6 +305,7 @@ def get_id_cached(
 
     cache_key = _cache_key_for(cache_type)
     cached    = get_from_valkey_cache(cache_key, value)
+    logger.info(f"Cache for key {cache_key} is {cached}")
     if cached is not None:
         return cached
 
