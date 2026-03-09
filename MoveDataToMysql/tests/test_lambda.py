@@ -233,9 +233,9 @@ class TestDomainUtmCaching:
         )
 
         assert result == 7
-        # Valkey read uses the value as-is
+        # Valkey read uses json.dumps(value) as the field
         mock_get_cache.assert_called_once_with(
-            lambda_function.CACHE_DOMAIN, '"mktran76.github.io"'
+            lambda_function.CACHE_DOMAIN, json.dumps('"mktran76.github.io"')
         )
         # Valkey write uses json.dumps(value) as the field
         mock_set_cache.assert_called_once_with(
@@ -257,7 +257,7 @@ class TestDomainUtmCaching:
             conn, lambda_function.CacheType.UTM_SOURCE, 'google'
         )
 
-        mock_get_cache.assert_called_once_with(lambda_function.CACHE_UTM_SOURCE, 'google')
+        mock_get_cache.assert_called_once_with(lambda_function.CACHE_UTM_SOURCE, json.dumps('google'))
         mock_set_cache.assert_called_once_with(lambda_function.CACHE_UTM_SOURCE, json.dumps('google'), 5)
 
     @patch('lambda_function.set_to_valkey_cache')
@@ -269,13 +269,13 @@ class TestDomainUtmCaching:
 
         result = lambda_function.get_id_cached(
             conn, lambda_function.CacheType.DOMAIN,
-            value='"mktran76.github.io"',
+            value='mktran76.github.io',
         )
 
         assert result == 16
         mock_set_cache.assert_not_called()  # no write on hit
         mock_get_cache.assert_called_once_with(
-            lambda_function.CACHE_DOMAIN, '"mktran76.github.io"'
+            lambda_function.CACHE_DOMAIN, json.dumps('mktran76.github.io')
         )
 
     def test_get_id_cached_empty_value(self, mock_db_connection):

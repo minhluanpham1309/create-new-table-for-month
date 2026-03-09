@@ -304,14 +304,15 @@ def get_id_cached(
         return None
 
     cache_key = _cache_key_for(cache_type)
-    cached    = get_from_valkey_cache(cache_key, value)
+    value_json = json.dumps(value)
+    cached    = get_from_valkey_cache(cache_key, value_json)
     logger.info(f"Cache for key {cache_key} is {cached}")
     if cached is not None:
         return cached
     logger.info(f"Cache for key after {cache_key} is {cached}")
     db_id = _save_to_db(connection, cache_type, value.strip().strip('"'))
     if db_id is not None:
-        set_to_valkey_cache(cache_key, json.dumps(value), db_id)
+        set_to_valkey_cache(cache_key, value_json, db_id)
     return db_id
 
 
