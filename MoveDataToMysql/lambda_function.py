@@ -308,7 +308,7 @@ def get_id_cached(
     logger.info(f"Cache for key {cache_key} is {cached}")
     if cached is not None:
         return cached
-
+    logger.info(f"Cache for key after {cache_key} is {cached}")
     db_id = _save_to_db(connection, cache_type, value.strip().strip('"'))
     if db_id is not None:
         set_to_valkey_cache(cache_key, json.dumps(value), db_id)
