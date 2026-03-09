@@ -331,7 +331,7 @@ class TestDataParsers:
 
     def test_parse_pageview_data_with_utm(self, mock_db_connection):
         conn, cursor = mock_db_connection
-        data = {'"2024-01-15 10;-;ref123;-;https://example.com;-;url456;-;desktop;-;1920;-;192.168.1.1;-;Mozilla;-;param1=value1;-;google.com;-;newsletter;-;email"'}
+        data = {'"2026-03-09 10;-;ref123;-;https://example.com;-;url456;-;desktop;-;1920;-;192.168.1.1;-;Mozilla;-;param1=value1;-;google.com;-;newsletter;-;email"'}
         domain_cache, utm_src_cache, utm_med_cache = {}, {}, {}
         with patch('lambda_function.get_id_cached', return_value=1):
             parsed, pairs = lambda_function.parse_pageview_data(
@@ -341,6 +341,56 @@ class TestDataParsers:
         assert parsed[0]['refDomainId'] == 1
         assert parsed[0]['refUtmSourceId'] == 1
         assert parsed[0]['refUtmMediumId'] == 1
+
+    def test_parse_pageview_data_quoted_domain_and_utm(self, mock_db_connection):
+        """Fields wrapped in extra quotes — "mktran76.github.io" — the cache key keeps
+        the original quoted string, but get_id_cached receives the stripped value."""
+        conn, cursor = mock_db_connection
+        data = {'"2026-03-09 10;-;ref1;-;https://mktran76.github.io/;-;urlA;-;desktop;-;1920;-;1.2.3.4;-;Chrome;-;;-;"mktran76.github.io";-;"google";-;"cpc"'}
+        domain_cache, utm_src_cache, utm_med_cache = {}, {}, {}
+
+        captured = {}
+        def fake_get_id_cached(conn, cache_type, value):
+            captured[cache_type.value] = value
+            return 99
+
+        with patch('lambda_function.get_id_cached', side_effect=fake_get_id_cached):
+            parsed, _ = lambda_function.parse_pageview_data(
+                data, conn, domain_cache, utm_src_cache, utm_med_cache
+            )
+
+        assert len(parsed) == 1
+        # Value passed to DB upsert must be stripped (no quotes)
+        assert captured['domain']     == 'mktran76.github.io'
+        assert captured['utm_source'] == 'google'
+        assert captured['utm_medium'] == 'cpc'
+        # IDs are correctly set on the dto
+        assert parsed[0]['refDomainId']    == 99
+        assert parsed[0]['refUtmSourceId'] == 99
+        assert parsed[0]['refUtmMediumId'] == 99
+
+    def test_parse_pageview_domain_cache_key_keeps_quotes(self, mock_db_connection):
+        """The in-process cache key is the ORIGINAL string (with "").
+        Two rows with the same quoted domain hit the cache after the first row."""
+        conn, cursor = mock_db_connection
+        row1 = '"2026-03-09 10;-;r1;-;u1;-;id1;-;desktop;-;1920;-;1.1.1.1;-;ua;-;;-;"mktran76.github.io";-;;-;"'
+        row2 = '"2026-03-09 11;-;r2;-;u2;-;id2;-;desktop;-;1920;-;1.1.1.1;-;ua;-;;-;"mktran76.github.io";-;;-;"'
+        domain_cache, utm_src_cache, utm_med_cache = {}, {}, {}
+
+        call_count = {'n': 0}
+        def fake_get_id_cached(conn, cache_type, value):
+            call_count['n'] += 1
+            return 7
+
+        with patch('lambda_function.get_id_cached', side_effect=fake_get_id_cached):
+            parsed, _ = lambda_function.parse_pageview_data(
+                {row1, row2}, conn, domain_cache, utm_src_cache, utm_med_cache
+            )
+
+        # get_id_cached called only ONCE — second row is a cache hit
+        assert call_count['n'] == 1
+        # Cache key is the ORIGINAL quoted string
+        assert '"mktran76.github.io"' in domain_cache
 
     def test_parse_pageview_data_malformed_row(self, mock_db_connection):
         conn, cursor = mock_db_connection
