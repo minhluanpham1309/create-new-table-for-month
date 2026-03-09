@@ -28,8 +28,8 @@ from common import (
     scan_redis_keys,
     get_redis_set_data,
     delete_redis_key,
-    get_from_redis_cache,
-    set_to_redis_cache,
+    get_from_valkey_cache,
+    set_to_valkey_cache,
 )
 
 # logger = logging.getLogger()
@@ -302,13 +302,13 @@ def get_id_cached(
         return None
 
     cache_key = _cache_key_for(cache_type)
-    cached    = get_from_redis_cache(cache_key, value)
+    cached    = get_from_valkey_cache(cache_key, value)
     if cached is not None:
         return cached
 
     db_id = _save_to_db(connection, cache_type, value)
     if db_id is not None:
-        set_to_redis_cache(cache_key, value, db_id)
+        set_to_valkey_cache(cache_key, value, db_id)
     return db_id
 
 
@@ -513,21 +513,24 @@ def parse_pageview_data(
             }
 
             if len(p) > 9 and p[9].strip():
-                d = p[9]
+                d = p[9]                          # keep original (with "") as cache key
+                d_clean = d.strip().strip('"')    # stripped value for DB upsert
                 if d not in domain_cache:
-                    domain_cache[d] = get_id_cached(connection, CacheType.DOMAIN, d)
+                    domain_cache[d] = get_id_cached(connection, CacheType.DOMAIN, d_clean)
                 dto["refDomainId"] = domain_cache[d]
 
             if len(p) > 10 and p[10].strip():
                 s = p[10]
+                s_clean = s.strip().strip('"')
                 if s not in utm_src_cache:
-                    utm_src_cache[s] = get_id_cached(connection, CacheType.UTM_SOURCE, s)
+                    utm_src_cache[s] = get_id_cached(connection, CacheType.UTM_SOURCE, s_clean)
                 dto["refUtmSourceId"] = utm_src_cache[s]
 
             if len(p) > 11 and p[11].strip():
                 m = p[11]
+                m_clean = m.strip().strip('"')
                 if m not in utm_med_cache:
-                    utm_med_cache[m] = get_id_cached(connection, CacheType.UTM_MEDIUM, m)
+                    utm_med_cache[m] = get_id_cached(connection, CacheType.UTM_MEDIUM, m_clean)
                 dto["refUtmMediumId"] = utm_med_cache[m]
 
             parsed.append(dto)
