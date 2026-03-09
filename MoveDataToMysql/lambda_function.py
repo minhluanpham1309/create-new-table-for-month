@@ -310,7 +310,7 @@ def get_id_cached(
 
     db_id = _save_to_db(connection, cache_type, value.strip().strip('"'))
     if db_id is not None:
-        set_to_valkey_cache(cache_key, value, db_id)
+        set_to_valkey_cache(cache_key, json.dumps(value), db_id)
     return db_id
 
 

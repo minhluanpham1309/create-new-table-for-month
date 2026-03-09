@@ -237,9 +237,9 @@ class TestDomainUtmCaching:
         mock_get_cache.assert_called_once_with(
             lambda_function.CACHE_DOMAIN, '"mktran76.github.io"'
         )
-        # Valkey write uses the value as-is
+        # Valkey write uses json.dumps(value) as the field
         mock_set_cache.assert_called_once_with(
-            lambda_function.CACHE_DOMAIN, '"mktran76.github.io"', 7
+            lambda_function.CACHE_DOMAIN, json.dumps('"mktran76.github.io"'), 7
         )
         # DB receives the stripped value
         executed_sql = cursor.execute.call_args[0][0]
@@ -258,7 +258,7 @@ class TestDomainUtmCaching:
         )
 
         mock_get_cache.assert_called_once_with(lambda_function.CACHE_UTM_SOURCE, 'google')
-        mock_set_cache.assert_called_once_with(lambda_function.CACHE_UTM_SOURCE, 'google', 5)
+        mock_set_cache.assert_called_once_with(lambda_function.CACHE_UTM_SOURCE, json.dumps('google'), 5)
 
     @patch('lambda_function.set_to_valkey_cache')
     @patch('lambda_function.get_from_valkey_cache')
