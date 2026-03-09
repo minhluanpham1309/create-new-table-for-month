@@ -198,15 +198,15 @@ class TestDomainUtmCaching:
         result = lambda_function._cache_key_for(cache_type)
         assert result == expected_key
 
-    @patch('lambda_function.get_from_redis_cache')
+    @patch('lambda_function.get_from_package_redis_cache')
     def test_get_id_cached_hit(self, mock_get_cache, mock_db_connection):
         conn, cursor = mock_db_connection
         mock_get_cache.return_value = 42
         result = lambda_function.get_id_cached(conn, lambda_function.CacheType.DOMAIN, 'google.com')
         assert result == 42
 
-    @patch('lambda_function.set_to_redis_cache')
-    @patch('lambda_function.get_from_redis_cache')
+    @patch('lambda_function.set_to_package_redis_cache')
+    @patch('lambda_function.get_from_package_redis_cache')
     def test_get_id_cached_miss(self, mock_get_cache, mock_set_cache, mock_db_connection):
         conn, cursor = mock_db_connection
         mock_get_cache.return_value = None

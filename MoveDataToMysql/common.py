@@ -318,3 +318,22 @@ def set_to_redis_cache(cache_key: str, field: str, id_value: int) -> None:
         get_redis_client().hset(cache_key, field, str(id_value))
     except Exception:
         logger.exception(f"hset failed [{cache_key}][{field}]")
+
+
+def get_from_package_redis_cache(cache_key: str, field: str) -> Optional[int]:
+    """Reads from db=0 (Package Redis) — used for domain/utm caches."""
+    try:
+        val = get_package_redis_client().hget(cache_key, field)
+        return int(val) if val is not None else None
+    except Exception:
+        logger.exception(f"hget (package redis) failed [{cache_key}][{field}]")
+        return None
+
+
+def set_to_package_redis_cache(cache_key: str, field: str, id_value: int) -> None:
+    """Writes to db=0 (Package Redis) — used for domain/utm caches."""
+    try:
+        get_package_redis_client().hset(cache_key, field, str(id_value))
+    except Exception:
+        logger.exception(f"hset (package redis) failed [{cache_key}][{field}]")
+
