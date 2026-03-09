@@ -83,9 +83,14 @@ _redis_client: Optional[redis.Redis] = None
 _secret_cache: Optional[Dict] = None
 _redis_lock = threading.Lock()
 
-# Redis client for package_code (separate host, db=0)
+# Redis client for package_code (separate host REDIS_NETTY_HOST, db=0)
 _package_redis_client: Optional[redis.Redis] = None
 _package_redis_lock = threading.Lock()
+
+# Valkey client — same REDIS_HOST as main, but db=0
+# Used for domain / utm_source / utm_medium caches
+_valkey_client: Optional[redis.Redis] = None
+_valkey_lock = threading.Lock()
 
 
 def get_max_workers() -> int:
@@ -125,6 +130,22 @@ def get_redis_client() -> redis.Redis:
                     label="Main",
                 )
     return _redis_client
+
+
+def get_valkey_client() -> redis.Redis:
+    """Valkey db=0 on REDIS_HOST — stores domain/utm_source/utm_medium caches."""
+    global _valkey_client
+    if _valkey_client is None:
+        with _valkey_lock:
+            if _valkey_client is None:
+                _valkey_client = _create_redis_client(
+                    host=os.environ["REDIS_HOST"],
+                    port=int(os.environ.get("REDIS_PORT", 6379)),
+                    password=os.environ.get("REDIS_PASSWORD") or None,
+                    db=0,
+                    label="Valkey",
+                )
+    return _valkey_client
 
 
 def get_package_redis_client() -> redis.Redis:
@@ -320,20 +341,19 @@ def set_to_redis_cache(cache_key: str, field: str, id_value: int) -> None:
         logger.exception(f"hset failed [{cache_key}][{field}]")
 
 
-def get_from_package_redis_cache(cache_key: str, field: str) -> Optional[int]:
-    """Reads from db=0 (Package Redis) — used for domain/utm caches."""
+def get_from_valkey_cache(cache_key: str, field: str) -> Optional[int]:
+    """Reads from Valkey db=0 (REDIS_HOST) — used for domain/utm caches."""
     try:
-        val = get_package_redis_client().hget(cache_key, field)
+        val = get_valkey_client().hget(cache_key, field)
         return int(val) if val is not None else None
     except Exception:
-        logger.exception(f"hget (package redis) failed [{cache_key}][{field}]")
+        logger.exception(f"hget (valkey db=0) failed [{cache_key}][{field}]")
         return None
 
 
-def set_to_package_redis_cache(cache_key: str, field: str, id_value: int) -> None:
-    """Writes to db=0 (Package Redis) — used for domain/utm caches."""
+def set_to_valkey_cache(cache_key: str, field: str, id_value: int) -> None:
+    """Writes to Valkey db=0 (REDIS_HOST) — used for domain/utm caches."""
     try:
-        get_package_redis_client().hset(cache_key, field, str(id_value))
+        get_valkey_client().hset(cache_key, field, str(id_value))
     except Exception:
-        logger.exception(f"hset (package redis) failed [{cache_key}][{field}]")
-
+        logger.exception(f"hset (valkey db=0) failed [{cache_key}][{field}]")

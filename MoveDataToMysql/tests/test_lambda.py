@@ -37,16 +37,19 @@ def seed_thread_local():
 
 @pytest.fixture(autouse=True)
 def reset_global_state():
-    original_redis_client = common._redis_client
+    original_redis_client   = common._redis_client
+    original_valkey_client  = common._valkey_client
     original_package_redis_client = common._package_redis_client
-    original_secret_cache = common._secret_cache
-    common._redis_client = None
+    original_secret_cache   = common._secret_cache
+    common._redis_client   = None
+    common._valkey_client  = None
     common._package_redis_client = None
-    common._secret_cache = None
+    common._secret_cache   = None
     yield
-    common._redis_client = original_redis_client
+    common._redis_client   = original_redis_client
+    common._valkey_client  = original_valkey_client
     common._package_redis_client = original_package_redis_client
-    common._secret_cache = original_secret_cache
+    common._secret_cache   = original_secret_cache
 
 
 @pytest.fixture
@@ -198,15 +201,15 @@ class TestDomainUtmCaching:
         result = lambda_function._cache_key_for(cache_type)
         assert result == expected_key
 
-    @patch('lambda_function.get_from_package_redis_cache')
+    @patch('lambda_function.get_from_valkey_cache')
     def test_get_id_cached_hit(self, mock_get_cache, mock_db_connection):
         conn, cursor = mock_db_connection
         mock_get_cache.return_value = 42
         result = lambda_function.get_id_cached(conn, lambda_function.CacheType.DOMAIN, 'google.com')
         assert result == 42
 
-    @patch('lambda_function.set_to_package_redis_cache')
-    @patch('lambda_function.get_from_package_redis_cache')
+    @patch('lambda_function.set_to_valkey_cache')
+    @patch('lambda_function.get_from_valkey_cache')
     def test_get_id_cached_miss(self, mock_get_cache, mock_set_cache, mock_db_connection):
         conn, cursor = mock_db_connection
         mock_get_cache.return_value = None
