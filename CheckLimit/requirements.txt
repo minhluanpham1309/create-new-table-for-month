@@ -1,4 +1,4 @@
-# MySQL Database Connection 
+# MySQL Database Connection
 pymysql==1.1.1
 
 # Environment Variables Management
@@ -10,8 +10,4 @@ boto3==1.34.34
 # pytz for timezone
 pytz==2024.2
 
-# Date utilities
-python-dateutil==2.9.0
-
-# Redis client for Python
-redis==5.0.1
+redis==5.0.4

@@ -4,12 +4,13 @@ import pymysql
 import ssl
 import os
 import boto3
-import redis
 from typing import Dict, List, Optional, Set
 import threading
 from botocore.config import Config
 from dotenv import load_dotenv
 import pytz
+
+from redis_wrapper import RedisWrapper
 
 # Load environment variables from .env file only when running locally
 if not os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
@@ -27,7 +28,7 @@ logger.setLevel(logging.INFO)
 JST = pytz.timezone('Asia/Tokyo')
 
 PATTERN_YYYY_MM_DD_HH = "%Y-%m-%d %H"
-PATTERN_YYYYMM = "%Y%m"
+PATTERN_YYYYMM        = "%Y%m"
 CHUNK_INDEX_TRACKING_DATA_KEY = ":chunk"
 DELIMITER = ";-;"
 
@@ -49,12 +50,12 @@ SOCIAL_PAGES = [
     "b.hatena.ne.jp",
 ]
 
-CACHE_KEY_PREFIX  = "heatmap:cache:"
-CACHE_DOMAIN      = f"{CACHE_KEY_PREFIX}domain"
-CACHE_UTM_SOURCE  = f"{CACHE_KEY_PREFIX}utm_source"
-CACHE_UTM_MEDIUM  = f"{CACHE_KEY_PREFIX}utm_medium"
+CACHE_KEY_PREFIX = "heatmap:cache:"
+CACHE_DOMAIN     = f"{CACHE_KEY_PREFIX}domain"
+CACHE_UTM_SOURCE = f"{CACHE_KEY_PREFIX}utm_source"
+CACHE_UTM_MEDIUM = f"{CACHE_KEY_PREFIX}utm_medium"
 
-BATCH_SIZE   = 500
+BATCH_SIZE         = 500
 MAX_DEADLOCK_RETRY = 3
 
 # ============================================================================
@@ -76,91 +77,79 @@ class CacheType(Enum):
 
 
 # ============================================================================
-# GLOBAL SINGLETONS  (initialized once per Lambda container)
+# GLOBAL SINGLETONS  (initialized once per Lambda container / warm start)
+#
+# Singleton pattern is intentional: reusing connection pools across invocations
+# avoids TCP + TLS handshake overhead on every call (~15-60ms per connection).
+#
+# DNS caching risk (stale IP after ElastiCache failover):
+#   Mitigated by health_check_interval=30 — redis-py sends PING before each
+#   command if connection was idle > 30s. Dead connection triggers reconnect,
+#   which re-resolves DNS and picks up the new primary IP automatically.
+#   socket_keepalive=True adds OS-level TCP keepalive for faster dead detection.
 # ============================================================================
 
-_redis_client: Optional[redis.Redis] = None
+_wrappers: Dict[str, RedisWrapper] = {}
+_locks: Dict[str, threading.Lock] = {
+    "data":    threading.Lock(),
+    "package": threading.Lock(),
+    "setting":  threading.Lock(),
+}
+
 _secret_cache: Optional[Dict] = None
-_redis_lock = threading.Lock()
-
-# Redis client for package_code (separate host REDIS_NETTY_HOST, db=0)
-_package_redis_client: Optional[redis.Redis] = None
-_package_redis_lock = threading.Lock()
-
-# Valkey client — same REDIS_HOST as main, but db=0
-# Used for domain / utm_source / utm_medium caches
-_valkey_client: Optional[redis.Redis] = None
-_valkey_lock = threading.Lock()
 
 
 def get_max_workers() -> int:
     return int(os.environ.get("MAX_WORKERS", 10))
 
 
-def _create_redis_client(host: str, port: int, password: Optional[str], db: int, label: str) -> redis.Redis:
-    """
-    Create a Redis client backed by a connection pool.
-    """
-    pool = redis.ConnectionPool(
-        host=host,
-        port=port,
-        password=password,
-        db=db,
-        decode_responses=True,
-        max_connections=20,
-        socket_connect_timeout=5,
-        socket_timeout=5,
+def _get_wrapper(label: str, host: str, port: int, password: Optional[str], db: int) -> RedisWrapper:
+    """Generic double-checked locking singleton getter for RedisWrapper."""
+    if label not in _wrappers:
+        with _locks[label]:
+            if label not in _wrappers:
+                _wrappers[label] = RedisWrapper(
+                    host=host,
+                    port=port,
+                    password=password,
+                    db=db,
+                    max_connections=20,  # threads + small buffer
+                    socket_connect_timeout=5,               # fail fast: Lambda→ElastiCache < 10ms
+                    socket_timeout=5,                       # allow time for read/write ops
+                )
+                logger.info(f"RedisWrapper initialized: label={label} host={host} port={port} db={db}")
+    return _wrappers[label]
+
+
+def _redis_host() -> str:
+    return os.environ["REDIS_HOST"]
+
+def _redis_port() -> int:
+    return int(os.environ.get("REDIS_PORT", 6380))
+
+def _redis_password() -> Optional[str]:
+    return os.environ.get("REDIS_PASSWORD") or None
+
+
+def get_data_redis_wrapper() -> RedisWrapper:
+    """Data Redis wrapper — REDIS_HOST, db=1."""
+    return _get_wrapper("data", _redis_host(), _redis_port(), _redis_password(), db=1)
+
+
+def get_package_redis_wrapper() -> RedisWrapper:
+    """Package Redis wrapper — REDIS_NETTY_HOST, db=0."""
+    return _get_wrapper(
+        "package",
+        host=os.environ["REDIS_NETTY_HOST"],
+        port=_redis_port(),
+        password=_redis_password(),
+        db=0,
     )
-    client = redis.Redis(connection_pool=pool)
-    client.ping()
-    logger.info(f"{label} Redis connection pool initialized")
-    return client
 
 
-def get_redis_client() -> redis.Redis:
-    global _redis_client
-    if _redis_client is None:
-        with _redis_lock:
-            if _redis_client is None:
-                _redis_client = _create_redis_client(
-                    host=os.environ["REDIS_HOST"],
-                    port=int(os.environ.get("REDIS_PORT", 6379)),
-                    password=os.environ.get("REDIS_PASSWORD") or None,
-                    db=1,
-                    label="Main",
-                )
-    return _redis_client
-
-
-def get_valkey_client() -> redis.Redis:
-    """Valkey db=0 on REDIS_HOST — stores domain/utm_source/utm_medium caches."""
-    global _valkey_client
-    if _valkey_client is None:
-        with _valkey_lock:
-            if _valkey_client is None:
-                _valkey_client = _create_redis_client(
-                    host=os.environ["REDIS_HOST"],
-                    port=int(os.environ.get("REDIS_PORT", 6379)),
-                    password=os.environ.get("REDIS_PASSWORD") or None,
-                    db=0,
-                    label="Valkey",
-                )
-    return _valkey_client
-
-
-def get_package_redis_client() -> redis.Redis:
-    global _package_redis_client
-    if _package_redis_client is None:
-        with _package_redis_lock:
-            if _package_redis_client is None:
-                _package_redis_client = _create_redis_client(
-                    host=os.environ["REDIS_NETTY_HOST"],
-                    port=int(os.environ.get("REDIS_PORT", 6379)),
-                    password=os.environ.get("REDIS_PASSWORD") or None,
-                    db=0,
-                    label="Package",
-                )
-    return _package_redis_client
+def get_setting_wrapper() -> RedisWrapper:
+    """setting wrapper — REDIS_HOST, db=0. Used for domain/utm_source/utm_medium caches."""
+    return _get_wrapper("setting", _redis_host(), _redis_port(), _redis_password(), db=0)
 
 
 # ============================================================================
@@ -176,21 +165,17 @@ def get_secret(region):
     if _secret_cache is not None:
         return _secret_cache
 
-    secret_name = os.environ.get('RDS_SECRET_NAME', 'rds/db-test-private')
+    secret_name = os.environ.get("RDS_SECRET_NAME", "rds/heatmap-db-secret")
     # Create client with timeout config
     config = Config(
         connect_timeout=5,
         read_timeout=10,
         retries={'max_attempts': 3}
     )
-
-    logger.info("Creating boto3 client for Secrets Manager...")
+    
     client = boto3.client('secretsmanager', region_name=region, config=config)
-
-    logger.info("Fetching secret value from Secrets Manager...")
     response = client.get_secret_value(SecretId=secret_name)
     _secret_cache = json.loads(response["SecretString"])
-    logger.info("Secret fetched from Secrets Manager")
     return _secret_cache
 
 
@@ -202,30 +187,27 @@ def get_ssl_context(region: str = "ap-northeast-1"):
     """Create SSL context with TLS 1.2+ (download CA bundle from AWS)"""
     try:
         ca_file_path = os.path.join(os.path.dirname(__file__), "certs", f"{region}-bundle.pem")
-
+        
         # Fallback to global bundle if region-specific not found
         if not os.path.exists(ca_file_path):
             ca_file_path = os.path.join(os.path.dirname(__file__), "certs", "global-bundle.pem")
-
+        
         if not os.path.exists(ca_file_path):
             raise FileNotFoundError(f"CA bundle not found at {ca_file_path}")
-
-        logger.info(f"Loading CA bundle from: {ca_file_path}")
-
+        
         # Create SSL context with TLS 1.2+
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ssl_context.load_verify_locations(cafile=ca_file_path)
-
+        
         # Configure verification
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
-        logger.info("SSL: VERIFY_CA")
-
+        
         # Set minimum TLS 1.2
         ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
-
+        
         return ssl_context
-
+    
     except Exception as e:
         logger.error(f"Failed to create SSL context: {str(e)}")
         raise
@@ -234,24 +216,22 @@ def get_ssl_context(region: str = "ap-northeast-1"):
 def get_db_connection(secret):
     try:
         ssl_context = get_ssl_context()
-
+        
         db_config = {
-            "host": secret.get("host", os.getenv("DB_HOST")),
-            "port": int(secret.get("port", os.getenv("DB_PORT", 3306))),
-            "user": secret.get("username", os.getenv("DB_USER")),
-            "password": secret.get("password", os.getenv("DB_PASSWORD")),
-            "database": secret.get("dbname", os.getenv("DB_NAME", "HEAT_MAP")),
-            "charset": "utf8mb4",
+            "host":            secret.get("host",     os.getenv("DB_HOST")),
+            "port":            int(secret.get("port", os.getenv("DB_PORT", 3306))),
+            "user":            secret.get("username", os.getenv("DB_USER")),
+            "password":        secret.get("password", os.getenv("DB_PASSWORD")),
+            "database":        secret.get("dbname",   os.getenv("DB_NAME", "HEAT_MAP")),
+            "charset":         "utf8mb4",
             "connect_timeout": 10,
-            "cursorclass": pymysql.cursors.DictCursor,
-            "ssl": ssl_context,
+            "cursorclass":     pymysql.cursors.DictCursor,
+            "ssl":             ssl_context,
         }
-
-        logger.info("Connecting to database...")
         connection = pymysql.connect(**db_config)
-        logger.info("Database connection established")
         return connection
-
+    
+    
     except pymysql.err.OperationalError as e:
         error_code = e.args[0] if e.args else None
         if error_code == 2003:
@@ -261,7 +241,7 @@ def get_db_connection(secret):
         else:
             logger.error(f"Database connection error: {str(e)}")
         raise
-
+    
     except Exception as e:
         logger.error(f"Failed to connect to database: {str(e)}")
         raise
@@ -272,17 +252,23 @@ def get_db_connection(secret):
 # ============================================================================
 
 def run_step(step_name: str, func, *args, **kwargs):
+    """
+    Execute a step with timing and error logging.
+    Logs start time, end time, and elapsed time for performance tracking.
+    """
+    from datetime import datetime
+
+    start_time = datetime.now(JST)
+    logger.info(f"[START] {step_name}")
+
     try:
-        logger.info("")
-        logger.info(f"====== START STEP: {step_name} ======")
         result = func(*args, **kwargs)
-        logger.info(f"====== DONE STEP: {step_name} ======")
-        logger.info("")
+        elapsed = (datetime.now(JST) - start_time).total_seconds()
+        logger.info(f"[SUCCESS] {step_name} — elapsed={elapsed:.2f}s")
         return result
     except Exception as e:
-        logger.error(f"====== ERROR STEP: {step_name} ======")
-        logger.error(f"Exception: {str(e)}")
-        logger.error("")
+        elapsed = (datetime.now(JST) - start_time).total_seconds()
+        logger.error(f"[ERROR] {step_name} — elapsed={elapsed:.2f}s — {str(e)}")
         raise
 
 
@@ -291,69 +277,43 @@ def run_step(step_name: str, func, *args, **kwargs):
 # ============================================================================
 
 def scan_redis_keys(pattern: str) -> List[str]:
-    """
-    Use SCAN instead of KEYS to avoid blocking Redis.
-    O(N) but non-blocking and cursor-based.
-    """
-    rc     = get_redis_client()
-    keys   = []
-    cursor = 0
-    while True:
-        cursor, batch = rc.scan(cursor=cursor, match=pattern, count=1000)
-        keys.extend(batch)
-        if cursor == 0:
-            break
-    logger.info(f"SCAN found {len(keys)} keys for pattern: {pattern}")
-    return keys
+    """SCAN instead of KEYS to avoid blocking Redis. O(N) but non-blocking."""
+    try:
+        return get_data_redis_wrapper().scan(pattern)
+    except Exception:
+        logger.error(f"scan failed for pattern: {pattern}")
+        return []
 
 
 def get_redis_set_data(key: str) -> Set[str]:
     try:
-        data = get_redis_client().smembers(key)
-        return data if data else set()
+        return get_data_redis_wrapper().smembers(key)
     except Exception:
-        logger.exception(f"smembers failed for key: {key}")
+        logger.error(f"smembers failed for key: {key}")
         return set()
 
 
 def delete_redis_key(key: str) -> bool:
     try:
-        get_redis_client().delete(key)
+        get_data_redis_wrapper().delete(key)
         return True
     except Exception:
-        logger.exception(f"delete failed for key: {key}")
+        logger.error(f"delete failed for key: {key}")
         return False
 
 
-def get_from_redis_cache(cache_key: str, field: str) -> Optional[int]:
+def get_from_setting_cache(cache_key: str, field: str) -> Optional[int]:
+    """Read int from setting db=0 (domain/utm caches)."""
     try:
-        val = get_redis_client().hget(cache_key, field)
-        return int(val) if val is not None else None
+        return get_setting_wrapper().hget_int(cache_key, field)
     except Exception:
-        logger.exception(f"hget failed [{cache_key}][{field}]")
+        logger.error(f"hget_int (setting db=0) failed [{cache_key}][{field}]")
         return None
 
 
-def set_to_redis_cache(cache_key: str, field: str, id_value: int) -> None:
+def set_to_setting_cache(cache_key: str, field: str, id_value: int) -> None:
+    """Write int to setting db=0 (domain/utm caches)."""
     try:
-        get_redis_client().hset(cache_key, field, str(id_value))
+        get_setting_wrapper().hset_int(cache_key, field, id_value)
     except Exception:
-        logger.exception(f"hset failed [{cache_key}][{field}]")
-
-
-def get_from_valkey_cache(cache_key: str, field: str) -> Optional[int]:
-    """Reads from Valkey db=0 (REDIS_HOST) — used for domain/utm caches."""
-    try:
-        val = get_valkey_client().hget(cache_key, field)
-        return int(val) if val is not None else None
-    except Exception:
-        logger.exception(f"hget (valkey db=0) failed [{cache_key}][{field}]")
-        return None
-
-
-def set_to_valkey_cache(cache_key: str, field: str, id_value: int) -> None:
-    """Writes to Valkey db=0 (REDIS_HOST) — used for domain/utm caches."""
-    try:
-        get_valkey_client().hset(cache_key, field, str(id_value))
-    except Exception:
-        logger.exception(f"hset (valkey db=0) failed [{cache_key}][{field}]")
+        logger.error(f"hset_int (setting db=0) failed [{cache_key}][{field}]")

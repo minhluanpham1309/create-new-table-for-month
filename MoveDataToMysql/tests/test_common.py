@@ -1,27 +1,34 @@
 """
-Unit tests for MoveDataToMysql common.py
+Unit tests for common.py
 
-Test Categories:
-- Constants & Enums: ReferrerDomainType, CacheType, constant values
-- AWS Helpers: get_region, get_secret
-- SSL / DB Connection: get_ssl_context, get_db_connection
-- Step Runner: run_step
-- Redis Helpers: get_redis_client, get_max_workers, scan_redis_keys,
-                 get_redis_set_data, delete_redis_key,
-                 get_from_redis_cache, set_to_redis_cache
+Test categories:
+  TestGetRegion            : get_region — env var + default
+  TestGetSecret            : get_secret — success, cache, error
+  TestGetSSLContext        : get_ssl_context — regional, fallback, not found
+  TestGetDbConnection      : get_db_connection — success, env fallbacks, errors
+  TestRunStep              : run_step — success, kwargs, exception
+  TestGetMaxWorkers        : get_max_workers — default, custom
+  TestGetWrapper           : _get_wrapper — singleton, ping failure, pool args
+  TestWrapperGetters       : get_data_redis_wrapper / get_package_redis_wrapper /
+                             get_setting_wrapper — isolation, db, host
+  TestScanRedisKeys        : scan_redis_keys — pagination, empty, exception
+  TestGetRedisSetData      : get_redis_set_data — members, empty, exception
+  TestDeleteRedisKey       : delete_redis_key — success, exception
+  TestGetFromSettingCache  : get_from_setting_cache — int, none, exception
+  TestSetToSettingCache    : set_to_setting_cache — hset_int call, exception
 
-All tests use mocks to avoid external dependencies (no real DB/Redis/AWS connections).
+All tests use mocks — no real DB/Redis/AWS connections.
 """
 
 import json
 import os
-import ssl
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 import pymysql
 from botocore.exceptions import ClientError
 
 import common
+from redis_wrapper import RedisWrapper
 
 
 # ===========================================================================
@@ -32,10 +39,14 @@ def _reset_secret_cache():
     common._secret_cache = None
 
 
-def _reset_redis_singletons():
-    common._redis_client = None
-    common._package_redis_client = None
+def _reset_wrappers():
+    """Clear singleton dict so each test starts fresh."""
+    common._wrappers.clear()
 
+
+def _mock_wrapper():
+    """Return a MagicMock that looks like a RedisWrapper."""
+    return MagicMock(spec=RedisWrapper)
 
 # ===========================================================================
 # AWS HELPERS
@@ -57,8 +68,6 @@ class TestGetRegion:
 
 
 class TestGetSecret:
-    """Test get_secret – AWS Secrets Manager helper."""
-
     def setup_method(self):
         _reset_secret_cache()
 
@@ -74,7 +83,7 @@ class TestGetSecret:
             "SecretString": json.dumps({
                 "host": "test-db.rds.amazonaws.com",
                 "username": "admin",
-                "password": "secret123",
+                "password": "mock-password-value",
             })
         }
 
@@ -82,7 +91,7 @@ class TestGetSecret:
 
         assert result["host"] == "test-db.rds.amazonaws.com"
         assert result["username"] == "admin"
-        assert result["password"] == "secret123"
+        assert result["password"] == "mock-password-value"
         mock_boto_client.assert_called_once()
 
     @patch("boto3.client")
@@ -119,8 +128,6 @@ class TestGetSecret:
 # ===========================================================================
 
 class TestGetSSLContext:
-    """Test get_ssl_context."""
-
     @patch("os.path.exists")
     @patch("ssl.SSLContext")
     def test_uses_region_bundle_when_exists(self, mock_ssl_context, mock_exists):
@@ -278,283 +285,269 @@ class TestGetMaxWorkers:
         assert common.get_max_workers() == 5
 
 
-class TestGetRedisClient:
-    """Test get_redis_client singleton."""
+# ============================================================================
+# _get_wrapper — singleton factory
+# ============================================================================
 
+class TestGetWrapper:
     def setup_method(self):
-        _reset_redis_singletons()
+        _reset_wrappers()
 
     def teardown_method(self):
-        _reset_redis_singletons()
+        _reset_wrappers()
 
     @patch.dict(os.environ, {"REDIS_HOST": "localhost", "REDIS_PORT": "6379"})
-    @patch("redis.Redis")
-    @patch("redis.ConnectionPool")
-    def test_creates_singleton(self, mock_pool_cls, mock_redis_cls):
-        mock_pool_cls.return_value = MagicMock()
-        mock_rc = MagicMock()
-        mock_redis_cls.return_value = mock_rc
+    @patch("common.RedisWrapper")
+    def test_creates_singleton(self, mock_wrapper_cls):
+        mock_wrapper_cls.return_value = _mock_wrapper()
 
-        c1 = common.get_redis_client()
-        c2 = common.get_redis_client()
+        w1 = common._get_wrapper("data", "localhost", 6379, None, db=1)
+        w2 = common._get_wrapper("data", "localhost", 6379, None, db=1)
 
-        assert c1 is c2
-        mock_pool_cls.assert_called_once()
-        mock_redis_cls.assert_called_once()
+        assert w1 is w2
+        mock_wrapper_cls.assert_called_once()
 
-    @patch.dict(os.environ, {"REDIS_HOST": "localhost"})
-    @patch("redis.Redis")
-    @patch("redis.ConnectionPool")
-    def test_raises_on_ping_failure(self, mock_pool_cls, mock_redis_cls):
-        mock_pool_cls.return_value = MagicMock()
-        mock_rc = MagicMock()
-        mock_rc.ping.side_effect = Exception("Connection refused")
-        mock_redis_cls.return_value = mock_rc
+    @patch("common.RedisWrapper")
+    def test_passes_correct_args(self, mock_wrapper_cls):
+        mock_wrapper_cls.return_value = _mock_wrapper()
+
+        common._get_wrapper("data", "my-host", 6380, "secret", db=2)
+
+        kwargs = mock_wrapper_cls.call_args[1]
+        assert kwargs["host"] == "my-host"
+        assert kwargs["port"] == 6380
+        assert kwargs["password"] == "secret"
+        assert kwargs["db"] == 2
+        assert kwargs["max_connections"] == 20
+        assert kwargs["socket_connect_timeout"] == 5
+        assert kwargs["socket_timeout"] == 5
+
+    @patch("common.RedisWrapper")
+    def test_ping_failure_does_not_store_singleton(self, mock_wrapper_cls):
+        """If RedisWrapper.__init__ raises (ping fails), singleton must NOT be stored."""
+        mock_wrapper_cls.side_effect = Exception("Connection refused")
 
         with pytest.raises(Exception, match="Connection refused"):
-            common.get_redis_client()
+            common._get_wrapper("data", "localhost", 6379, None, db=1)
 
-    @patch.dict(os.environ, {"REDIS_HOST": "main-redis", "REDIS_PORT": "6379", "REDIS_PASSWORD": "pass", "REDIS_DB": "1"})
-    @patch("redis.Redis")
-    @patch("redis.ConnectionPool")
-    def test_uses_correct_env_vars(self, mock_pool_cls, mock_redis_cls):
-        """get_redis_client passes REDIS_HOST/PORT/PASSWORD/DB with db from REDIS_DB env."""
-        mock_pool_cls.return_value = MagicMock()
-        mock_redis_cls.return_value = MagicMock()
-
-        common.get_redis_client()
-
-        call_kwargs = mock_pool_cls.call_args[1]
-        assert call_kwargs["host"] == "main-redis"
-        assert call_kwargs["port"] == 6379
-        assert call_kwargs["password"] == "pass"
-        assert call_kwargs["db"] == 1
+        assert "data" not in common._wrappers
 
 
-class TestGetPackageRedisClient:
-    """Test get_package_redis_client singleton."""
+# ============================================================================
+# get_data_redis_wrapper / get_package_redis_wrapper / get_setting_wrapper
+# ============================================================================
 
+class TestWrapperGetters:
     def setup_method(self):
-        _reset_redis_singletons()
+        _reset_wrappers()
 
     def teardown_method(self):
-        _reset_redis_singletons()
+        _reset_wrappers()
 
-    @patch.dict(os.environ, {"REDIS_NETTY_HOST": "pkg-redis", "REDIS_PORT": "6379"})
-    @patch("redis.Redis")
-    @patch("redis.ConnectionPool")
-    def test_creates_singleton(self, mock_pool_cls, mock_redis_cls):
-        mock_pool_cls.return_value = MagicMock()
-        mock_rc = MagicMock()
-        mock_redis_cls.return_value = mock_rc
+    @patch.dict(os.environ, {"REDIS_HOST": "main-host", "REDIS_PORT": "6379"})
+    @patch("common.RedisWrapper")
+    def test_data_wrapper_uses_db1(self, mock_wrapper_cls):
+        mock_wrapper_cls.return_value = _mock_wrapper()
 
-        c1 = common.get_package_redis_client()
-        c2 = common.get_package_redis_client()
+        common.get_data_redis_wrapper()
 
-        assert c1 is c2
-        mock_pool_cls.assert_called_once()
-        mock_redis_cls.assert_called_once()
+        assert mock_wrapper_cls.call_args[1]["db"] == 1
+        assert mock_wrapper_cls.call_args[1]["host"] == "main-host"
 
-    @patch.dict(os.environ, {"REDIS_NETTY_HOST": "pkg-redis"})
-    @patch("redis.Redis")
-    @patch("redis.ConnectionPool")
-    def test_raises_on_ping_failure(self, mock_pool_cls, mock_redis_cls):
-        mock_pool_cls.return_value = MagicMock()
-        mock_rc = MagicMock()
-        mock_rc.ping.side_effect = Exception("Connection refused")
-        mock_redis_cls.return_value = mock_rc
+    @patch.dict(os.environ, {"REDIS_NETTY_HOST": "pkg-host", "REDIS_PORT": "6379"})
+    @patch("common.RedisWrapper")
+    def test_package_wrapper_uses_netty_host(self, mock_wrapper_cls):
+        mock_wrapper_cls.return_value = _mock_wrapper()
 
-        with pytest.raises(Exception, match="Connection refused"):
-            common.get_package_redis_client()
+        common.get_package_redis_wrapper()
 
-    @patch.dict(os.environ, {"REDIS_NETTY_HOST": "pkg-redis", "REDIS_HOST": "main-redis"})
-    @patch("redis.Redis")
-    @patch("redis.ConnectionPool")
-    def test_independent_from_main_redis(self, mock_pool_cls, mock_redis_cls):
-        """Package Redis client is a separate singleton from the main Redis client."""
-        mock_pool_cls.return_value = MagicMock()
-        main_rc = MagicMock()
-        pkg_rc = MagicMock()
-        mock_redis_cls.side_effect = [main_rc, pkg_rc]
+        assert mock_wrapper_cls.call_args[1]["host"] == "pkg-host"
+        assert mock_wrapper_cls.call_args[1]["db"] == 0
 
-        main = common.get_redis_client()
-        pkg = common.get_package_redis_client()
+    @patch.dict(os.environ, {"REDIS_HOST": "main-host", "REDIS_PORT": "6379"})
+    @patch("common.RedisWrapper")
+    def test_setting_wrapper_uses_db0(self, mock_wrapper_cls):
+        mock_wrapper_cls.return_value = _mock_wrapper()
 
-        assert main is not pkg
+        common.get_setting_wrapper()
+
+        assert mock_wrapper_cls.call_args[1]["db"] == 0
+        assert mock_wrapper_cls.call_args[1]["host"] == "main-host"
+
+    @patch.dict(os.environ, {
+        "REDIS_HOST": "main-host", "REDIS_NETTY_HOST": "pkg-host", "REDIS_PORT": "6379"
+    })
+    @patch("common.RedisWrapper")
+    def test_three_wrappers_are_independent(self, mock_wrapper_cls):
+        """data / package / setting must be separate singleton instances."""
+        mock_wrapper_cls.side_effect = [_mock_wrapper(), _mock_wrapper(), _mock_wrapper()]
+
+        data    = common.get_data_redis_wrapper()
+        package = common.get_package_redis_wrapper()
+        setting = common.get_setting_wrapper()
+
+        assert data is not package
+        assert data is not setting
+        assert package is not setting
+
+    @patch.dict(os.environ, {"REDIS_HOST": "main-host", "REDIS_PORT": "6379"})
+    @patch("common.RedisWrapper")
+    def test_data_and_setting_are_separate_even_with_same_host(self, mock_wrapper_cls):
+        """data (db=1) and setting (db=0) share REDIS_HOST but must be different objects."""
+        mock_wrapper_cls.side_effect = [_mock_wrapper(), _mock_wrapper()]
+
+        data    = common.get_data_redis_wrapper()
+        setting = common.get_setting_wrapper()
+
+        assert data is not setting
+        assert mock_wrapper_cls.call_count == 2
 
 
-class TestCreateRedisClient:
-    """Test _create_redis_client shared factory."""
-
-    @patch("redis.Redis")
-    @patch("redis.ConnectionPool")
-    def test_creates_pool_with_correct_params(self, mock_pool_cls, mock_redis_cls):
-        mock_pool_cls.return_value = MagicMock()
-        mock_redis_cls.return_value = MagicMock()
-
-        common._create_redis_client("my-host", 6379, "secret", 2, "Test")
-
-        call_kwargs = mock_pool_cls.call_args[1]
-        assert call_kwargs["host"] == "my-host"
-        assert call_kwargs["port"] == 6379
-        assert call_kwargs["password"] == "secret"
-        assert call_kwargs["db"] == 2
-        assert call_kwargs["decode_responses"] is True
-        assert call_kwargs["max_connections"] == 20
-
-    @patch("redis.Redis")
-    @patch("redis.ConnectionPool")
-    def test_calls_ping_on_new_client(self, mock_pool_cls, mock_redis_cls):
-        mock_pool_cls.return_value = MagicMock()
-        mock_rc = MagicMock()
-        mock_redis_cls.return_value = mock_rc
-
-        common._create_redis_client("host", 6379, None, 0, "Label")
-
-        mock_rc.ping.assert_called_once()
-
-    @patch("redis.Redis")
-    @patch("redis.ConnectionPool")
-    def test_returns_redis_client(self, mock_pool_cls, mock_redis_cls):
-        mock_pool_cls.return_value = MagicMock()
-        mock_rc = MagicMock()
-        mock_redis_cls.return_value = mock_rc
-
-        result = common._create_redis_client("host", 6379, None, 1, "Main")
-
-        assert result is mock_rc
-
+# ============================================================================
+# scan_redis_keys
+# ============================================================================
 
 class TestScanRedisKeys:
-    """Test scan_redis_keys."""
+    def setup_method(self):
+        _reset_wrappers()
 
-    @patch("common.get_redis_client")
-    def test_accumulates_all_pages(self, mock_get_rc):
-        mock_rc = MagicMock()
-        mock_get_rc.return_value = mock_rc
-        mock_rc.scan.side_effect = [
-            (1, ["key:1", "key:2"]),
-            (0, ["key:3"]),
-        ]
+    def teardown_method(self):
+        _reset_wrappers()
+
+    @patch("common.get_data_redis_wrapper")
+    def test_returns_all_pages(self, mock_get):
+        w = _mock_wrapper()
+        mock_get.return_value = w
+        w.scan.return_value = ["key:1", "key:2", "key:3"]
 
         result = common.scan_redis_keys("key:*")
 
         assert sorted(result) == ["key:1", "key:2", "key:3"]
-        assert mock_rc.scan.call_count == 2
+        w.scan.assert_called_once_with("key:*")
 
-    @patch("common.get_redis_client")
-    def test_returns_empty_list_when_no_match(self, mock_get_rc):
-        mock_rc = MagicMock()
-        mock_get_rc.return_value = mock_rc
-        mock_rc.scan.return_value = (0, [])
+    @patch("common.get_data_redis_wrapper")
+    def test_returns_empty_list_on_no_match(self, mock_get):
+        w = _mock_wrapper()
+        mock_get.return_value = w
+        w.scan.return_value = []
 
-        result = common.scan_redis_keys("nonexistent:*")
+        assert common.scan_redis_keys("nomatch:*") == []
 
-        assert result == []
+    @patch("common.get_data_redis_wrapper")
+    def test_returns_empty_list_on_exception(self, mock_get):
+        w = _mock_wrapper()
+        mock_get.return_value = w
+        w.scan.side_effect = Exception("Redis down")
 
+        assert common.scan_redis_keys("key:*") == []
+
+
+# ============================================================================
+# get_redis_set_data
+# ============================================================================
 
 class TestGetRedisSetData:
-    """Test get_redis_set_data."""
+    @patch("common.get_data_redis_wrapper")
+    def test_returns_members(self, mock_get):
+        w = _mock_wrapper()
+        mock_get.return_value = w
+        w.smembers.return_value = {"a", "b", "c"}
 
-    @patch("common.get_redis_client")
-    def test_returns_members(self, mock_get_rc):
-        mock_rc = MagicMock()
-        mock_get_rc.return_value = mock_rc
-        mock_rc.smembers.return_value = {"a", "b", "c"}
+        assert common.get_redis_set_data("key") == {"a", "b", "c"}
+        w.smembers.assert_called_once_with("key")
 
-        result = common.get_redis_set_data("my_key")
+    @patch("common.get_data_redis_wrapper")
+    def test_returns_empty_set_on_exception(self, mock_get):
+        w = _mock_wrapper()
+        mock_get.return_value = w
+        w.smembers.side_effect = Exception("Redis error")
 
-        assert result == {"a", "b", "c"}
-        mock_rc.smembers.assert_called_once_with("my_key")
+        assert common.get_redis_set_data("key") == set()
 
-    @patch("common.get_redis_client")
-    def test_returns_empty_set_when_key_empty(self, mock_get_rc):
-        mock_rc = MagicMock()
-        mock_get_rc.return_value = mock_rc
-        mock_rc.smembers.return_value = set()
 
-        assert common.get_redis_set_data("empty_key") == set()
-
-    @patch("common.get_redis_client")
-    def test_returns_empty_set_on_exception(self, mock_get_rc):
-        mock_rc = MagicMock()
-        mock_get_rc.return_value = mock_rc
-        mock_rc.smembers.side_effect = Exception("Redis error")
-
-        assert common.get_redis_set_data("err_key") == set()
-
+# ============================================================================
+# delete_redis_key
+# ============================================================================
 
 class TestDeleteRedisKey:
-    """Test delete_redis_key."""
+    @patch("common.get_data_redis_wrapper")
+    def test_returns_true_on_success(self, mock_get):
+        w = _mock_wrapper()
+        mock_get.return_value = w
 
-    @patch("common.get_redis_client")
-    def test_returns_true_on_success(self, mock_get_rc):
-        mock_rc = MagicMock()
-        mock_get_rc.return_value = mock_rc
+        assert common.delete_redis_key("key") is True
+        w.delete.assert_called_once_with("key")
 
-        result = common.delete_redis_key("del_key")
+    @patch("common.get_data_redis_wrapper")
+    def test_returns_false_on_exception(self, mock_get):
+        w = _mock_wrapper()
+        mock_get.return_value = w
+        w.delete.side_effect = Exception("Redis down")
 
-        assert result is True
-        mock_rc.delete.assert_called_once_with("del_key")
-
-    @patch("common.get_redis_client")
-    def test_returns_false_on_exception(self, mock_get_rc):
-        mock_rc = MagicMock()
-        mock_get_rc.return_value = mock_rc
-        mock_rc.delete.side_effect = Exception("Redis down")
-
-        assert common.delete_redis_key("bad_key") is False
+        assert common.delete_redis_key("key") is False
 
 
-class TestGetFromRedisCache:
-    """Test get_from_redis_cache."""
+# ============================================================================
+# get_from_setting_cache
+# ============================================================================
 
-    @patch("common.get_redis_client")
-    def test_returns_int_when_field_exists(self, mock_get_rc):
-        mock_rc = MagicMock()
-        mock_get_rc.return_value = mock_rc
-        mock_rc.hget.return_value = "42"
+class TestGetFromSettingCache:
+    @patch("common.get_setting_wrapper")
+    def test_returns_int(self, mock_get):
+        w = _mock_wrapper()
+        mock_get.return_value = w
+        w.hget_int.return_value = 42
 
-        result = common.get_from_redis_cache("my_cache", "field1")
+        result = common.get_from_setting_cache("cache_key", "domain")
 
         assert result == 42
-        mock_rc.hget.assert_called_once_with("my_cache", "field1")
+        w.hget_int.assert_called_once_with("cache_key", "domain")
 
-    @patch("common.get_redis_client")
-    def test_returns_none_when_field_missing(self, mock_get_rc):
-        mock_rc = MagicMock()
-        mock_get_rc.return_value = mock_rc
-        mock_rc.hget.return_value = None
+    @patch("common.get_setting_wrapper")
+    def test_returns_none_when_missing(self, mock_get):
+        w = _mock_wrapper()
+        mock_get.return_value = w
+        w.hget_int.return_value = None
 
-        assert common.get_from_redis_cache("my_cache", "missing") is None
+        assert common.get_from_setting_cache("cache_key", "missing") is None
 
-    @patch("common.get_redis_client")
-    def test_returns_none_on_exception(self, mock_get_rc):
-        mock_rc = MagicMock()
-        mock_get_rc.return_value = mock_rc
-        mock_rc.hget.side_effect = Exception("Redis error")
+    @patch("common.get_setting_wrapper")
+    def test_returns_none_on_exception(self, mock_get):
+        w = _mock_wrapper()
+        mock_get.return_value = w
+        w.hget_int.side_effect = Exception("Redis error")
 
-        assert common.get_from_redis_cache("my_cache", "field1") is None
+        assert common.get_from_setting_cache("cache_key", "field") is None
 
 
-class TestSetToRedisCache:
-    """Test set_to_redis_cache."""
+# ============================================================================
+# set_to_setting_cache
+# ============================================================================
 
-    @patch("common.get_redis_client")
-    def test_calls_hset_with_string_value(self, mock_get_rc):
-        mock_rc = MagicMock()
-        mock_get_rc.return_value = mock_rc
+class TestSetToSettingCache:
+    @patch("common.get_setting_wrapper")
+    def test_calls_hset_int(self, mock_get):
+        w = _mock_wrapper()
+        mock_get.return_value = w
 
-        common.set_to_redis_cache("my_cache", "field1", 99)
+        common.set_to_setting_cache("cache_key", "domain", 99)
 
-        mock_rc.hset.assert_called_once_with("my_cache", "field1", "99")
+        w.hset_int.assert_called_once_with("cache_key", "domain", 99)
 
-    @patch("common.get_redis_client")
-    def test_swallows_exception_silently(self, mock_get_rc):
-        mock_rc = MagicMock()
-        mock_get_rc.return_value = mock_rc
-        mock_rc.hset.side_effect = Exception("Redis down")
+    @patch("common.get_setting_wrapper")
+    def test_returns_none(self, mock_get):
+        w = _mock_wrapper()
+        mock_get.return_value = w
 
-        # Must not raise
-        common.set_to_redis_cache("my_cache", "field1", 1)
+        assert common.set_to_setting_cache("cache_key", "field", 42) is None
 
+    @patch("common.get_setting_wrapper")
+    def test_does_not_raise_on_exception(self, mock_get):
+        w = _mock_wrapper()
+        mock_get.return_value = w
+        w.hset_int.side_effect = Exception("Redis error")
+
+        result = common.set_to_setting_cache("cache_key", "field", 7)
+
+        assert result is None
+        w.hset_int.assert_called_once_with("cache_key", "field", 7)

@@ -24,6 +24,12 @@ variable "allowed_security_group_ids" {
   default     = []
 }
 
+variable "manage_allowed_security_group_ingress_rules" {
+  description = "Whether Terraform should manage ingress rules from allowed_security_group_ids"
+  type        = bool
+  default     = true
+}
+
 variable "node_type" {
   description = "The instance class for Valkey nodes"
   type        = string

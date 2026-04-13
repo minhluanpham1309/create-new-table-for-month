@@ -37,7 +37,7 @@ resource "aws_security_group" "valkey" {
 
 # Standalone ingress rules — avoids conflict with external aws_vpc_security_group_ingress_rule resources
 resource "aws_vpc_security_group_ingress_rule" "valkey_from_allowed" {
-  for_each = toset(var.allowed_security_group_ids)
+  for_each = var.manage_allowed_security_group_ingress_rules ? toset(var.allowed_security_group_ids) : toset([])
 
   security_group_id            = aws_security_group.valkey.id
   from_port                    = var.port
