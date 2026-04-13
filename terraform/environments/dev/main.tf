@@ -12,6 +12,7 @@ locals {
   delete_lambda_arn         = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_delete_heat_map_cache}:${var.lambda_alias}"
   delete_old_data_lambda_arn  = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_delete_old_data_heat_map}:${var.lambda_alias}"
   move_data_to_mysql_lambda_arn  = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_move_data_to_mysql}:${var.lambda_alias}"
+  check_limit_lambda_arn  = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_check_limit}:${var.lambda_alias}"
   sns_topic_arn               = "arn:aws:sns:${local.aws_shorthand}:${var.sns_topic_monthly_adding_site_tables_notifications}"
   step_functions_state_machine_arn = "arn:aws:states:${local.aws_shorthand}:stateMachine:${var.sfn_name_monthly_adding_site_tables_consumer}"
 
@@ -42,7 +43,7 @@ locals {
         Sid      = "InvokeLambdaFunction"
         Effect   = "Allow"
         Action   = ["lambda:InvokeFunction"]
-        Resource = [local.producer_lambda_arn , local.delete_lambda_arn, local.delete_old_data_lambda_arn, local.move_data_to_mysql_lambda_arn]
+        Resource = [local.producer_lambda_arn , local.delete_lambda_arn, local.delete_old_data_lambda_arn, local.move_data_to_mysql_lambda_arn, local.check_limit_lambda_arn]
       }]
     })
     
@@ -99,6 +100,7 @@ module "heatmap_japan_dev" {
   
   # Valkey - Disable Terraform management (managed manually on AWS)
   enable_valkey = true
+  valkey_manage_allowed_security_group_ingress_rules = false
   
   # Valkey configuration for dev - single node for cost savings
   valkey_node_type                  = "cache.t4g.micro" # Smallest ARM-based instance
@@ -144,6 +146,7 @@ module "heatmap_japan_dev" {
 
     # Scheduler configuration
     schedule_name = "monthly-adding-site-tables-producer-schedule"
+    schedule_enabled    = false
     scheduler_inline_policies = {
       "invoke-lambda" = local.eventbridge_scheduler_policies["invoke-lambda"]
     }
@@ -192,6 +195,7 @@ module "heatmap_japan_dev" {
     # Scheduler configuration
     schedule_name       = "monthly-adding-site-tables-consumer-schedule"
     schedule_expression = "cron(30 0 * * ? *)" # At 00:30 AM every day
+    schedule_enabled    = false
     scheduler_inline_policies = {
       "execute-state-machine" = local.eventbridge_scheduler_policies["execute-state-machine"]
     }
@@ -233,6 +237,7 @@ module "heatmap_japan_dev" {
     # Scheduler configuration
     schedule_name = "delete-heat-map-cache-schedule"
     schedule_expression = "cron(0 0 1 * ? *)"
+    schedule_enabled    = false
     scheduler_inline_policies = {
       "invoke-lambda" = local.eventbridge_scheduler_policies["invoke-lambda"]
     }
@@ -273,6 +278,7 @@ module "heatmap_japan_dev" {
     # Scheduler configuration
     schedule_name = "delete-old-data-heat-map-schedule"
     schedule_expression = "cron(0 0 1 * ? *)"
+    schedule_enabled    = false
     scheduler_inline_policies = {
       "invoke-lambda" = local.eventbridge_scheduler_policies["invoke-lambda"]
     }
@@ -325,6 +331,53 @@ module "heatmap_japan_dev" {
     # Scheduler configuration (optional - comment out if not needed)
     schedule_name = "move-data-to-mysql-schedule"
     schedule_expression = "cron(5 * * * ? *)" # Daily at 5 minutes past every hour
+    schedule_enabled    = false
+    scheduler_inline_policies = {
+      "invoke-lambda" = local.eventbridge_scheduler_policies["invoke-lambda"]
+    }
+
+    schedule_retry_policy = {
+      maximum_event_age_in_seconds = 900
+      maximum_retry_attempts       = 3
+    }
+  }
+  
+  check_limit = {
+    # Lambda function configuration
+    lambda_function_name = var.lambda_function_name_check_limit
+
+    lambda_environment_variables = {
+      RDS_SECRET_NAME = "rds/db-test-private"
+      REDIS_NETTY_HOST = "172.31.16.248"
+      REDIS_PORT      = "6379"
+      REDIS_NETTY_DB  = "0"
+      REDIS_SSL       = "false"
+    }
+    
+    lambda_inline_policies = local.lambda_policies
+    lambda_log_retention_in_days = 90
+    lambda_alias = var.lambda_alias
+
+    # VPC config
+    create_security_group = true
+    vpc_config = {
+      vpc_id             = "vpc-08586cd9f6ce3a905"
+      subnet_ids         = ["subnet-0ffa21d23c30bbf14", "subnet-09e78cbbf83798d9a", "subnet-0071f6115ba604b19", "subnet-05a0ae0ddd174baba"]
+      security_group_ids = []
+    }
+
+    # RDS Security Group
+    rds_security_group_id = "sg-0ec24edb38ce58304"
+
+    # Secrets Manager End Point Security Group
+    smg_end_point_sg_id = "sg-00ca8426775d6c9b3"
+    
+    netty_redis_sg_id = "sg-0e61332f35f4aae2d"
+
+    # Scheduler configuration (optional - comment out if not needed)
+    schedule_name = "check-limit-schedule"
+    schedule_expression = "cron(30 10-19 ? * MON-FRI *)"
+    schedule_enabled    = false
     scheduler_inline_policies = {
       "invoke-lambda" = local.eventbridge_scheduler_policies["invoke-lambda"]
     }

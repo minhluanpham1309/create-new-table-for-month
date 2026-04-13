@@ -29,3 +29,7 @@ variable "lambda_alias" {
 variable "lambda_function_name_move_data_to_mysql" {
   default = "MoveDataToMysql"
 }
+
+variable "lambda_function_name_check_limit" {
+  default = "CheckLimit"
+}

@@ -19,8 +19,8 @@ from common import (
     ReferrerDomainType, CacheType,
     # helpers
     get_max_workers,
-    get_redis_client,
-    get_package_redis_client,
+    get_data_redis_wrapper,
+    get_package_redis_wrapper,
     get_region,
     get_secret,
     get_db_connection,
@@ -28,47 +28,39 @@ from common import (
     scan_redis_keys,
     get_redis_set_data,
     delete_redis_key,
-    get_from_valkey_cache,
-    set_to_valkey_cache,
+    get_from_setting_cache,
+    set_to_setting_cache,
 )
 
-# logger = logging.getLogger()
-# logger.setLevel(logging.INFO)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 _thread_local = threading.local()
 
 # ============================================================================
-# LAMBDA HANDLER
+# LAMBDA HANDLERS
 # ============================================================================
 
-def lambda_handler(event=None, context=None):
+def move_handler(event=None, context=None):
     """
     Triggered hourly by EventBridge.
     Moves analytics data from Redis to per-site MySQL schemas.
     """
     logger.info("=" * 60)
-    logger.info("START  MOVE DATA TO MYSQL")
+    logger.info("START MOVE DATA TO MYSQL")
     logger.info("=" * 60)
-
+    
+    logger.info("Connecting resources...")
     region = get_region()
     secret = run_step("get_secret", get_secret, region)
-    run_step("init_redis", get_redis_client)
+    run_step("init_redis", get_data_redis_wrapper)
 
     # One connection for the coordinator (schema lookups etc.)
     cnx = run_step("open_db_connection", get_db_connection, secret)
+    logger.info("Resources connected")
 
     try:
         stats = run_step("execute_move_data", execute_move_data, cnx, secret)
-
-        logger.info("=" * 60)
-        logger.info("END  MOVE DATA TO MYSQL")
-        logger.info("=" * 60)
 
         return {
             "statusCode": 200,
@@ -77,12 +69,60 @@ def lambda_handler(event=None, context=None):
 
     except Exception:
         cnx.rollback()
-        logger.exception("Fatal error in lambda_handler")
+        logger.error("Fatal error in move_handler")
         raise
 
     finally:
         cnx.close()
         logger.info("Coordinator DB connection closed")
+
+        logger.info("=" * 60)
+        logger.info("END MOVE DATA TO MYSQL")
+        logger.info("=" * 60)
+
+
+def move_missing_handler(event=None, context=None):
+    """
+    Triggered on schedule to backfill/move missing analytics data.
+    Mimics Java ExecuteMoveMissingDataToMySQLV2.execute logic:
+      - Consider keys for the month of (now - 2 hours)
+      - Exclude keys from current hour and the previous hour
+      - Filter out chunk/index keys
+      - Move remaining keys' data to MySQL
+    """
+    logger.info("=" * 60)
+    logger.info("START MOVE MISSING DATA TO MYSQL")
+    logger.info("=" * 60)
+
+    logger.info("Connecting resources...")
+    region = get_region()
+    secret = run_step("get_secret", get_secret, region)
+    run_step("init_redis", get_data_redis_wrapper)
+
+    cnx = run_step("open_db_connection", get_db_connection, secret)
+    logger.info("Resources connected")
+
+    try:
+        stats = run_step("execute_move_missing_data", execute_move_missing_data, cnx, secret)
+        cnx.commit()
+
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"message": "Success", "stats": stats}),
+        }
+
+    except Exception:
+        cnx.rollback()
+        logger.error("Fatal error in move_missing_handler")
+        raise
+
+    finally:
+        cnx.close()
+        logger.info("Coordinator DB connection closed")
+
+        logger.info("=" * 60)
+        logger.info("END MOVE MISSING DATA TO MYSQL")
+        logger.info("=" * 60)
 
 
 # ============================================================================
@@ -91,39 +131,104 @@ def lambda_handler(event=None, context=None):
 
 def execute_move_data(coordinator_cnx: pymysql.connections.Connection, secret: Dict) -> Dict[str, Any]:
     """
-    Determine target keys and table name based on mode, then move data to MySQL.
-
-    mode="normal" (default — regular hourly run):
-      - Scans Redis for keys matching 1 hour ago (YYYY-MM-DD HH pattern).
-      - date_key  = 1 hour ago formatted as PATTERN_YYYY_MM_DD_HH
-      - table_name = 1 hour ago formatted as PATTERN_YYYYMM
+    1. Determine target date key and table name (1 hour ago in JST).
+    2. Scan Redis for matching keys.
+    3. Load the active schema list.
+    4. Dispatch per-key work to a thread pool (each thread opens its own DB connection).
     """
-    now_jst = datetime.now(JST)
+    
+    now_jst      = datetime.now(JST)
+    one_hour_ago = now_jst - timedelta(hours=1)
+    date_key     = one_hour_ago.strftime(PATTERN_YYYY_MM_DD_HH)
+    table_name   = one_hour_ago.strftime(PATTERN_YYYYMM)
 
-    one_hour_ago_dt = now_jst - timedelta(hours=1)
-    date_key        = one_hour_ago_dt.strftime(PATTERN_YYYY_MM_DD_HH)
-    table_name      = one_hour_ago_dt.strftime(PATTERN_YYYYMM)
-
-    logger.info(f"date_key  : {date_key}")
-    logger.info(f"table_name: {table_name}")
+    # Compact scan summary for traceability without noise
+    logger.info(
+        f"SCAN summary — date_key={date_key} table={table_name}"
+    )
 
     all_keys      = scan_redis_keys(f"*{date_key}*")
     filtered_keys = [k for k in all_keys if CHUNK_INDEX_TRACKING_DATA_KEY not in k]
+    chunk_count   = len(all_keys) - len(filtered_keys)
 
-    logger.info(f"Total keys found  : {len(all_keys)}")
-    logger.info(f"Keys after filter : {len(filtered_keys)}")
+    logger.info(
+        f"Keys — total={len(all_keys)} filtered={len(filtered_keys)} chunks={chunk_count}"
+    )
 
     if not filtered_keys:
         return {"date_key": date_key, "table_name": table_name,
                 "total_keys": 0, "successful": 0, "failed": 0}
 
     schema_set = get_schema_set(coordinator_cnx)
-    logger.info(f"Active DB schemas : {len(schema_set)}")
+    logger.info(f"Active schemas: {len(schema_set)}")
 
+    logger.info(f"Starting parallel processing — keys={len(filtered_keys)} workers={get_max_workers()}")
     stats = process_keys_parallel(filtered_keys, schema_set, table_name, secret)
 
     return {
         "date_key":    date_key,
+        "table_name":  table_name,
+        "total_keys":  len(filtered_keys),
+        "successful":  stats["successful"],
+        "failed":      stats["failed"],
+    }
+
+
+def execute_move_missing_data(coordinator_cnx: pymysql.connections.Connection, secret: Dict) -> Dict[str, Any]:
+    """
+    Backfill/move missing data similar to Java ExecuteMoveMissingDataToMySQLV2.execute.
+    - Use month pattern for (now - 2 hours) to scan keys for that month
+    - Exclude keys that belong to current hour and the previous hour
+    - Filter out chunk/index keys
+    - Process remaining keys in parallel
+    """
+    now_jst = datetime.now(JST)
+
+    # Patterns
+    current_hour_key   = now_jst.strftime(PATTERN_YYYY_MM_DD_HH)
+    one_hour_before    = now_jst - timedelta(hours=1)
+    one_hour_key       = one_hour_before.strftime(PATTERN_YYYY_MM_DD_HH)
+    two_hours_before   = now_jst - timedelta(hours=2)
+    month_pattern      = two_hours_before.strftime("%Y-%m")
+    table_name         = two_hours_before.strftime(PATTERN_YYYYMM)
+
+    # Scan Redis keys
+    scan_start = datetime.now(JST)
+    exclude_current = set(scan_redis_keys(f"*{current_hour_key}*"))
+    exclude_one     = set(scan_redis_keys(f"*{one_hour_key}*"))
+    all_month_keys  = set(scan_redis_keys(f"*{month_pattern}*"))
+
+    # Remove non-missing keys
+    candidate_keys = list(all_month_keys - exclude_current - exclude_one)
+
+    # Filter out chunk/index keys
+    filtered_keys = [k for k in candidate_keys if CHUNK_INDEX_TRACKING_DATA_KEY not in k]
+    chunk_count   = len(candidate_keys) - len(filtered_keys)
+    scan_elapsed = (datetime.now(JST) - scan_start).total_seconds()
+
+    logger.info(
+        f"SCAN summary — month=*{month_pattern}* table={table_name} total={len(all_month_keys)} "
+        f"exclude_current={len(exclude_current)} exclude_prev={len(exclude_one)} filtered={len(filtered_keys)} "
+        f"chunks={chunk_count} — scan_elapsed={scan_elapsed:.2f}s"
+    )
+
+    if not filtered_keys:
+        return {
+            "date_key": f"*{month_pattern}*",
+            "table_name": table_name,
+            "total_keys": 0,
+            "successful": 0,
+            "failed": 0,
+        }
+
+    schema_set = get_schema_set(coordinator_cnx)
+    logger.info(f"Active schemas: {len(schema_set)}")
+
+    logger.info(f"Starting parallel processing — keys={len(filtered_keys)} workers={get_max_workers()}")
+    stats = process_keys_parallel(filtered_keys, schema_set, table_name, secret)
+
+    return {
+        "date_key":    f"*{month_pattern}*",
         "table_name":  table_name,
         "total_keys":  len(filtered_keys),
         "successful":  stats["successful"],
@@ -146,7 +251,6 @@ def get_schema_set(connection: pymysql.connections.Connection) -> Set[str]:
 # ============================================================================
 # PARALLEL KEY PROCESSING
 # ============================================================================
-
 def _thread_init(secret: Dict, connections: list, lock: threading.Lock):
     """
     Runs exactly once when a worker thread starts.
@@ -174,42 +278,47 @@ def process_keys_parallel(
     Each worker thread reuses a single DB connection (opened once in _thread_init)
     for all keys it handles.  Connections are closed after the pool is joined.
     """
-    successful  = 0
-    failed      = 0
-    # FIX 3: track connections opened by threads so we can close them after the
+    successful = 0
+    failed     = 0
+    
+    # Track connections opened by threads so we can close them after the
     # pool exits — the old "cleanup_pool" approach was wrong because it created
     # brand-new threads (with brand-new connections) and closed those instead.
-    connections : List[pymysql.connections.Connection] = []
-    lock        = threading.Lock()
-
+    connections: List[pymysql.connections.Connection] = []
+    lock = threading.Lock()
+    
     with ThreadPoolExecutor(
-        max_workers=get_max_workers(),
-        initializer=_thread_init,
-        initargs=(secret, connections, lock),
+            max_workers=get_max_workers(),
+            initializer=_thread_init,
+            initargs=(secret, connections, lock),
     ) as pool:
         future_map: Dict[Any, str] = {}
-
+        
         for key in keys:
             # Key format: {site_id}_{YYYY-MM-DD HH}_{type_key}:{chunk_idx}
             parts = key.split("_")
             if len(parts) < 3:
                 logger.warning(f"Skipping malformed key: {key}")
                 continue
-
-            site_id  = parts[0]
+            
+            site_id = parts[0]
             type_key = parts[2].split(":")[0]
-
+            
             if site_id not in schema_set:
                 logger.info(f"Schema not found for site {site_id} — deleting key")
                 delete_redis_key(key)
                 continue
-
-            # FIX 4: removed redundant secret + schema_set args from process_single_key
+            
             future = pool.submit(process_single_key, key, site_id, type_key, table_name)
             future_map[future] = key
+        
+        progress_interval = 25
+        total = len(future_map)
+        processed = 0
 
         for future in as_completed(future_map):
             key = future_map[future]
+            processed += 1
             try:
                 ok = future.result()
                 if ok:
@@ -217,8 +326,13 @@ def process_keys_parallel(
                 else:
                     failed += 1
             except Exception:
-                logger.exception(f"Unhandled exception for key: {key}")
+                logger.error(f"Unhandled exception for key: {key}")
                 failed += 1
+
+            if processed == total or processed % progress_interval == 0:
+                logger.info(
+                    f"Parallel progress — processed={processed}/{total} success={successful} failed={failed}"
+                )
 
     # Pool has joined — all threads finished; now close their connections
     for conn in connections:
@@ -226,12 +340,12 @@ def process_keys_parallel(
             conn.close()
         except Exception:
             pass
-    logger.info(f"Closed {len(connections)} thread DB connections")
-    logger.info(f"Parallel processing done — success={successful}  failed={failed}")
+    logger.info(
+        f"Parallel processing done — success={successful} failed={failed}; closed_connections={len(connections)}"
+    )
     return {"successful": successful, "failed": failed}
 
 
-# FIX 4 cont.: removed unused `secret` and `schema_set` params
 def process_single_key(
     redis_key: str,
     site_id: str,
@@ -256,7 +370,7 @@ def process_single_key(
         return handler(connection, redis_key, site_id, table_name)
 
     except Exception:
-        logger.exception(f"Error in worker for key: {redis_key}")
+        logger.error(f"Error in worker for key: {redis_key}")
         try:
             _thread_local.conn.rollback()
         except Exception:
@@ -295,24 +409,20 @@ def get_id_cached(
     value: str,
 ) -> Optional[int]:
     """
-    1. Check Valkey hash cache using cache_field as the hash field
-       (cache_field keeps the original quoted form, e.g. '"mktran76.github.io"').
-    2. On miss: upsert into DB using value (stripped), then populate cache.
-    cache_field defaults to value when not provided.
+    1. Check Redis hash cache.
+    2. On miss: upsert into DB, then populate cache.
     """
     if not value:
         return None
 
     cache_key = _cache_key_for(cache_type)
-    value_json = json.dumps(value)
-    cached    = get_from_valkey_cache(cache_key, value_json)
-    logger.info(f"Cache for key {cache_key} is {cached}")
+    cached    = get_from_setting_cache(cache_key, value)
     if cached is not None:
         return cached
-    logger.info(f"Cache for key after {cache_key} is {cached}")
-    db_id = _save_to_db(connection, cache_type, value.strip().strip('"'))
+
+    db_id = _save_to_db(connection, cache_type, value)
     if db_id is not None:
-        set_to_valkey_cache(cache_key, value_json, db_id)
+        set_to_setting_cache(cache_key, value, db_id)
     return db_id
 
 
@@ -340,7 +450,7 @@ def _upsert_referrer_domain(connection, domain: str) -> Optional[int]:
         connection.commit()
         return row_id
     except Exception:
-        logger.exception(f"Upsert REFERRER_DOMAIN failed: {domain}")
+        logger.error(f"Upsert REFERRER_DOMAIN failed: {domain}")
         connection.rollback()
         return None
 
@@ -357,7 +467,7 @@ def _upsert_utm_source(connection, utm_source: str) -> Optional[int]:
         connection.commit()
         return row_id
     except Exception:
-        logger.exception(f"Upsert REFERRER_UTM_SOURCE failed: {utm_source}")
+        logger.error(f"Upsert REFERRER_UTM_SOURCE failed: {utm_source}")
         connection.rollback()
         return None
 
@@ -374,7 +484,7 @@ def _upsert_utm_medium(connection, utm_medium: str) -> Optional[int]:
         connection.commit()
         return row_id
     except Exception:
-        logger.exception(f"Upsert REFERRER_UTM_MEDIUM failed: {utm_medium}")
+        logger.error(f"Upsert REFERRER_UTM_MEDIUM failed: {utm_medium}")
         connection.rollback()
         return None
 
@@ -402,7 +512,7 @@ def extract_parameter_pairs(parameters_str: str) -> List[Dict]:
         except Exception:
             key, val = k, v
 
-        if key.startswith("utm_"):
+        if not key.startswith("utm_"):
             continue
 
         pair_id = hashlib.md5(f"{key}{val}".encode()).hexdigest()
@@ -419,53 +529,102 @@ def build_group_id(pairs: List[Dict]) -> str:
 
 def save_parameter_pairs(
     connection: pymysql.connections.Connection,
-    parameter_pairs: List[Dict],
+    group_pairs_map: Dict[str, List[Dict]],
 ) -> bool:
     """
     Upsert into PARAMETER_PAIR and PARAMETER_PAIR_GROUP tables.
     Retries up to MAX_DEADLOCK_RETRY times on MySQL deadlock (error 1213).
     """
-    if not parameter_pairs:
+    if not group_pairs_map:
         return True
 
-    group_id = build_group_id(parameter_pairs)
+    pair_groups = [
+        {
+            "group_id": group_id,
+            "id": pair["id"],
+            "key": pair["key"],
+            "value": pair["value"],
+        }
+        for group_id, pairs in group_pairs_map.items()
+        for pair in pairs
+    ]
 
-    for attempt in range(1, MAX_DEADLOCK_RETRY + 1):
+    for i in range(0, len(pair_groups), BATCH_SIZE):
+        if not _store_parameter_pairs_with_retry(connection, pair_groups[i:i + BATCH_SIZE]):
+            return False
+
+    return True
+
+
+def _store_parameter_pairs_with_retry(
+    connection: pymysql.connections.Connection,
+    target_list: List[Dict],
+) -> bool:
+    retry_count = 0
+    group_rows, pair_rows = _prepare_parameter_pair_rows(target_list)
+
+    while True:
         try:
-            with connection.cursor() as cur:
-                for pair in parameter_pairs:
-                    cur.execute(
-                        "INSERT INTO HEAT_MAP.PARAMETER_PAIR (ID, `KEY`, `VALUE`) VALUES (%s, %s, %s) "
-                        "ON DUPLICATE KEY UPDATE `KEY` = `KEY`, `VALUE` = `VALUE`",
-                        (pair["id"], pair["key"], pair["value"]),
-                    )
-                for pair in parameter_pairs:
-                    cur.execute(
-                        "INSERT INTO HEAT_MAP.PARAMETER_PAIR_GROUP (ID, PARAMETER_PAIR_ID) VALUES (%s, %s) "
-                        "ON DUPLICATE KEY UPDATE ID = ID",
-                        (group_id, pair["id"]),
-                    )
+            _store_parameter_pairs_chunk(connection, group_rows, pair_rows)
             connection.commit()
             return True
 
         except pymysql.err.OperationalError as exc:
-            if exc.args[0] == 1213:  # deadlock
+            if exc.args[0] != 1213:
                 connection.rollback()
-                logger.warning(f"Deadlock on parameter pairs (attempt {attempt}/{MAX_DEADLOCK_RETRY})")
-                if attempt == MAX_DEADLOCK_RETRY:
-                    logger.error("Deadlock retry limit reached for parameter pairs")
-                    return False
-            else:
-                connection.rollback()
-                logger.exception("OperationalError saving parameter pairs")
+                logger.error("OperationalError saving parameter pairs")
                 return False
+
+            retry_count += 1
+            connection.rollback()
+            logger.warning(f"Deadlock on parameter pairs (attempt {retry_count}/{MAX_DEADLOCK_RETRY})")
+            if retry_count >= MAX_DEADLOCK_RETRY:
+                logger.error("Deadlock retry limit reached for parameter pairs")
+                return False
+            continue
 
         except Exception:
             connection.rollback()
-            logger.exception("Error saving parameter pairs")
+            logger.error("Error saving parameter pairs")
             return False
 
-    return False
+
+def _build_parameter_pair_group_rows(target_list: List[Dict]) -> List[tuple]:
+    return list(
+        dict.fromkeys((pair["group_id"], pair["id"]) for pair in target_list)
+    )
+
+
+def _build_parameter_pair_rows(target_list: List[Dict]) -> List[tuple]:
+    return list(
+        dict.fromkeys((pair["id"], pair["key"], pair["value"]) for pair in target_list)
+    )
+
+
+def _prepare_parameter_pair_rows(target_list: List[Dict]) -> Tuple[List[tuple], List[tuple]]:
+    return (
+        _build_parameter_pair_group_rows(target_list),
+        _build_parameter_pair_rows(target_list),
+    )
+
+
+def _store_parameter_pairs_chunk(
+    connection: pymysql.connections.Connection,
+    group_rows: List[tuple],
+    pair_rows: List[tuple],
+) -> None:
+    group_sql = (
+        "INSERT INTO HEAT_MAP.PARAMETER_PAIR_GROUP (ID, PARAMETER_PAIR_ID) VALUES (%s, %s) "
+        "ON DUPLICATE KEY UPDATE ID = ID"
+    )
+    pair_sql = (
+        "INSERT INTO HEAT_MAP.PARAMETER_PAIR (ID, `KEY`, `VALUE`) VALUES (%s, %s, %s) "
+        "ON DUPLICATE KEY UPDATE `KEY` = `KEY`, `VALUE` = `VALUE`"
+    )
+
+    with connection.cursor() as cur:
+        cur.executemany(group_sql, group_rows)
+        cur.executemany(pair_sql, pair_rows)
 
 
 # ============================================================================
@@ -478,16 +637,9 @@ def parse_pageview_data(
     domain_cache:  Dict[str, Optional[int]],
     utm_src_cache: Dict[str, Optional[int]],
     utm_med_cache: Dict[str, Optional[int]],
-) -> Tuple[List[Dict], List[Dict]]:
-    """
-    Format:
-      dateCreate;-;referrerId;-;url;-;urlId;-;device;-;winWidth;-;ipA;-;userAgent
-      ;-;parameters;-;domain;-;utmSource;-;utmMedium
-
-    Returns (pageview_dtos, all_parameter_pairs)
-    """
-    parsed           = []
-    all_pairs        = []
+) -> Tuple[List[Dict], Dict[str, List[Dict]]]:
+    parsed          = []
+    group_pairs_map: Dict[str, List[Dict]] = {}   # group_id → pairs
 
     for row in raw_data:
         try:
@@ -495,11 +647,11 @@ def parse_pageview_data(
             if len(p) < 3:
                 continue
 
-            # Parameter pairs
-            params_str = p[8] if len(p) > 8 else ""
-            pairs      = extract_parameter_pairs(params_str)
-            group_id   = build_group_id(pairs) if pairs else None
-            all_pairs.extend(pairs)
+            pairs    = extract_parameter_pairs(p[8] if len(p) > 8 else "")
+            group_id = build_group_id(pairs) if pairs else None
+
+            if group_id and group_id not in group_pairs_map:
+                group_pairs_map[group_id] = pairs
 
             dto: Dict[str, Any] = {
                 "dateCreate":         p[0]  if len(p) > 0  else None,
@@ -517,7 +669,7 @@ def parse_pageview_data(
             }
 
             if len(p) > 9 and p[9].strip():
-                d = p[9]                          # keep original (with "") as cache key
+                d = p[9]
                 if d not in domain_cache:
                     domain_cache[d] = get_id_cached(connection, CacheType.DOMAIN, d)
                 dto["refDomainId"] = domain_cache[d]
@@ -537,9 +689,9 @@ def parse_pageview_data(
             parsed.append(dto)
 
         except Exception:
-            logger.exception(f"Error parsing pageview row: {row[:120]}")
+            logger.error(f"Error parsing pageview row: {row[:120]}")
 
-    return parsed, all_pairs
+    return parsed, group_pairs_map
 
 
 def parse_click_data(raw_data: Set[str]) -> List[Dict]:
@@ -556,7 +708,7 @@ def parse_click_data(raw_data: Set[str]) -> List[Dict]:
                 "title":      p[9], "urlId":     p[10],
             })
         except Exception:
-            logger.exception(f"Error parsing click row: {row[:120]}")
+            logger.error(f"Error parsing click row: {row[:120]}")
     return parsed
 
 
@@ -573,7 +725,7 @@ def parse_scroll_data(raw_data: Set[str]) -> List[Dict]:
                 "urlId":      p[6],
             })
         except Exception:
-            logger.exception(f"Error parsing scroll row: {row[:120]}")
+            logger.error(f"Error parsing scroll row: {row[:120]}")
     return parsed
 
 
@@ -590,102 +742,137 @@ def parse_read_data(raw_data: Set[str]) -> List[Dict]:
                 "pos":        p[6], "urlId":     p[7],
             })
         except Exception:
-            logger.exception(f"Error parsing read row: {row[:120]}")
+            logger.error(f"Error parsing read row: {row[:120]}")
     return parsed
 
 
 # ============================================================================
 # PROCESS HANDLERS  (one per data type)
 # ============================================================================
+def process_pageview(connection, redis_key: str, site_id: str, table_name: str) -> bool:
+    extra_parse_args: tuple = (
+        connection,
+        _thread_local.domain_cache,
+        _thread_local.utm_src_cache,
+        _thread_local.utm_med_cache,
+    )
 
-def _load_and_process(
-    connection, redis_key: str, site_id: str, table_name: str,
-    parse_fn, insert_fn,
-    extra_parse_args: tuple = (),
-) -> bool:
-    """
-    Generic load-parse-insert-delete pipeline shared by all four types.
-    For pageview, parse_fn returns (list, pairs); for others it returns a list.
-    """
     raw = get_redis_set_data(redis_key)
     if not raw:
-        logger.debug(f"No data in Redis key {redis_key} — skipping and deleting")
-        delete_redis_key(redis_key)
+        logger.info(f"[pv/referrer - SKIP] Redis key has no data, skip pageview processing: {redis_key}")
         return True
 
-    result = parse_fn(raw, *extra_parse_args)
-    pairs  = None
-    parsed = result
+    logger.info(
+        f"[pv/referrer - START] insert total datas={len(raw)} from key={redis_key} into site={site_id}"
+    )
+    parsed_data, group_pairs_map = parse_pageview_data(raw, *extra_parse_args)
 
-    if isinstance(result, tuple):
-        parsed, pairs = result
-
-    if not parsed:
-        delete_redis_key(redis_key)
+    if not parsed_data:
+        logger.error(f"[pv/referrer - ERROR] no parsed rows for key={redis_key}")
         return True
 
-    ok = insert_fn(connection, site_id, parsed, table_name)
+    ok = insert_pageviews(connection, site_id, parsed_data, table_name)
     if not ok:
+        logger.error(f"[pv/referrer - ERROR] insert key={redis_key} failed for site={site_id} ")
         return False
 
-    # Pageview extras (store_total_pv + parameter_pairs) — non-fatal failures
-    if pairs is not None:
-        try:
-            pv_ok = store_total_pv(connection, site_id, table_name, len(parsed))
-            if not pv_ok:
-                logger.warning(f"store_total_pv failed for site {site_id}")
-        except Exception:
-            logger.exception(f"store_total_pv exception for site {site_id}")
+    pv_ok = False
+    try:
+        pv_ok = store_total_pv(connection, site_id, table_name, len(parsed_data))
+        if not pv_ok:
+            logger.error(f"[pv/referrer - ERROR] store_total_pv failed of key={redis_key} for site {site_id}")
+    except Exception:
+        logger.error(f"[pv/referrer - ERROR] store_total_pv exception of key={redis_key} for site {site_id}")
 
-        if pairs:
-            unique_pairs = list({p["id"]: p for p in pairs}.values())
-            pair_ok = save_parameter_pairs(connection, unique_pairs)
-            if not pair_ok:
-                logger.warning(f"save_parameter_pairs failed for site {site_id}")
-                return False
+    pair_ok = save_parameter_pairs(connection, group_pairs_map)
+    if not pair_ok:
+        logger.error(f"[pv/referrer - ERROR] parameter pair save failed site={site_id} key={redis_key}")
+        ok = False
 
-    # Always delete the key once the main insert succeeded
-    delete_redis_key(redis_key)
-    return True
-
-
-def process_pageview(connection, redis_key: str, site_id: str, table_name: str) -> bool:
-    return _load_and_process(
-        connection, redis_key, site_id, table_name,
-        parse_fn=parse_pageview_data,
-        insert_fn=insert_pageviews,
-        extra_parse_args=(
-            connection,
-            _thread_local.domain_cache,
-            _thread_local.utm_src_cache,
-            _thread_local.utm_med_cache,
-        ),
-    )
+    if pv_ok:
+        delete_redis_key(redis_key)
+        logger.info(
+            f"[pv/referrer - SUCCESS] insert total datas={len(parsed_data)} from key={redis_key} into site={site_id}"
+        )
+    return ok
 
 
 def process_click(connection, redis_key: str, site_id: str, table_name: str) -> bool:
-    return _load_and_process(
-        connection, redis_key, site_id, table_name,
-        parse_fn=parse_click_data,
-        insert_fn=insert_clicks,
+    raw = get_redis_set_data(redis_key)
+    if not raw:
+        logger.info(f"[click - SKIP] Redis key has no data, skip click processing: {redis_key}")
+        return True
+
+    result = parse_click_data(raw)
+    logger.info(
+        f"[click - START] insert total datas={len(result)} from key={redis_key} into site={site_id}"
     )
+
+    if not result:
+        logger.error(f"[click - ERROR] no parsed rows for key={redis_key}")
+        return True
+    ok = insert_clicks(connection, site_id, result, table_name)
+    if not ok:
+        logger.error(f"[click - ERROR] insert key={redis_key} failed for site={site_id}")
+        return False
+    else:
+        delete_redis_key(redis_key)
+        logger.info(
+            f"[click - SUCCESS] insert total datas={len(result)} from key={redis_key} into site={site_id}"
+        )
+    return ok
 
 
 def process_scroll(connection, redis_key: str, site_id: str, table_name: str) -> bool:
-    return _load_and_process(
-        connection, redis_key, site_id, table_name,
-        parse_fn=parse_scroll_data,
-        insert_fn=insert_scrolls,
+    raw = get_redis_set_data(redis_key)
+    if not raw:
+        logger.info(f"[scroll - SKIP] Redis key has no data, skip scroll processing: {redis_key}")
+        return True
+
+    result = parse_scroll_data(raw)
+    logger.info(
+        f"[scroll - START] insert total datas={len(result)} from key={redis_key} into site={site_id}"
     )
+
+    if not result:
+        logger.error(f"[scroll - ERROR] no parsed rows for key={redis_key}")
+        return True
+    ok = insert_scrolls(connection, site_id, result, table_name)
+    if not ok:
+        logger.error(f"[scroll - ERROR] insert key={redis_key} failed for site={site_id}")
+        return False
+    else:
+        delete_redis_key(redis_key)
+        logger.info(
+            f"[scroll - SUCCESS] insert total datas={len(result)} from key={redis_key} into site={site_id}"
+        )
+    return ok
 
 
 def process_read(connection, redis_key: str, site_id: str, table_name: str) -> bool:
-    return _load_and_process(
-        connection, redis_key, site_id, table_name,
-        parse_fn=parse_read_data,
-        insert_fn=insert_reads,
+    raw = get_redis_set_data(redis_key)
+    if not raw:
+        logger.info(f"[read - SKIP] Redis key has no data, skip read processing: {redis_key}")
+        return True
+
+    result = parse_read_data(raw)
+    logger.info(
+        f"[read - START] insert total datas={len(result)} from key={redis_key} into site={site_id}"
     )
 
+    if not result:
+        logger.error(f"[read - ERROR] no parsed rows for key={redis_key}")
+        return True
+    ok = insert_reads(connection, site_id, result, table_name)
+    if not ok:
+        logger.error(f"[read - ERROR] insert key={redis_key} failed for site={site_id}")
+        return False
+    else:
+        delete_redis_key(redis_key)
+        logger.info(
+            f"[read - SUCCESS] insert total datas={len(result)} from key={redis_key} into site={site_id}"
+        )
+    return ok
 
 # ============================================================================
 # DATABASE INSERT HELPERS
@@ -711,7 +898,7 @@ def _execute_batch(
 
     except Exception:
         connection.rollback()
-        logger.exception(f"Batch insert failed for {label}")
+        logger.error(f"Batch insert failed for {label}")
         return False
 
 
@@ -747,15 +934,16 @@ def insert_clicks(connection, site_id: str, data: List[Dict], table_name: str) -
     table = f"`{site_id}`.`{table_name}_click`"
     sql   = (
         f"INSERT INTO {table} "
-        "(date_added, xpos, ypos, win_width, doc_width, doc_height, device, referrer_id, url_id, link, title) "
+        "(date_added, xpos, ypos, win_width, doc_width, doc_height, "
+        "device, referrer_id, url_id, link, title) "
         "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
     )
     rows = [
         (
-            item.get("dateCreate"),  item.get("xpos"),       item.get("ypos"),
-            item.get("winWidth"),    item.get("docWidth"),   item.get("docHeight"),
-            item.get("device"),      item.get("referrerId"), item.get("urlId"),
-            item.get("link"),        item.get("title"),
+            item.get("dateCreate"), item.get("xpos"),       item.get("ypos"),
+            item.get("winWidth"),   item.get("docWidth"),   item.get("docHeight"),
+            item.get("device"),     item.get("referrerId"), item.get("urlId"),
+            item.get("link"),       item.get("title"),
         )
         for item in data
     ]
@@ -805,14 +993,64 @@ def insert_reads(connection, site_id: str, data: List[Dict], table_name: str) ->
 def get_package_code_from_redis(site_id: str) -> Optional[str]:
     """
     Fetch PACKAGE_CODE from Redis hash 'list_sites_setup' using site_id as field.
-    Mirrors Java: redissonUtils.getHashByKey("list_sites_setup", siteId)
+    Mirrors Java: redissonUtils.getHashByKey("list_sites_setup", Integer.toString(siteId))
+
+    Redisson (Java) serializes both field and value as JSON strings, so the
+    actual Redis field is "\"931739482\"" and value is "\"456A445271B2...\"".
+    Python's hget receives the raw string, so we must:
+      - wrap site_id in JSON quotes when looking up the field
+      - strip surrounding JSON quotes from the returned value
     """
     try:
-        val = get_package_redis_client().hget("list_sites_setup", site_id)
-        return val if val else None
+        val = get_package_redis_wrapper().hget_str("list_sites_setup", site_id)
+        if not val:
+            return None
+        return val
     except Exception:
-        logger.exception(f"get_package_code_from_redis failed for site={site_id}")
+        logger.error(f"get_package_code_from_redis failed for site={site_id}")
         return None
+
+
+def get_package_code_from_db(
+    connection: pymysql.connections.Connection,
+    site_id: str,
+) -> Optional[str]:
+    """
+    Fetch PACKAGE_CODE from HEAT_MAP.HEATMAP_SITE by site_id.
+    Returns None when the site does not exist or PACKAGE_CODE is empty.
+    """
+    try:
+        with connection.cursor() as cur:
+            cur.execute(
+                "SELECT PACKAGE_CODE FROM HEAT_MAP.HEATMAP_SITE WHERE SITE_ID = %s",
+                (site_id,),
+            )
+            row = cur.fetchone()
+
+        if not row:
+            return None
+
+        return row.get("PACKAGE_CODE") or None
+    except Exception:
+        logger.error(
+            "Failed to resolve PACKAGE_CODE from DB fallback HEAT_MAP.HEATMAP_SITE for site_id=%s",
+            site_id,
+        )
+        return None
+
+
+def get_package_code(
+    connection: pymysql.connections.Connection,
+    site_id: str,
+) -> Optional[str]:
+    """
+    Resolve PACKAGE_CODE by site_id from Redis first, then database.
+    """
+    package_code = get_package_code_from_redis(site_id)
+    if package_code:
+        return package_code
+
+    return get_package_code_from_db(connection, site_id)
 
 
 def store_total_pv(
@@ -824,9 +1062,9 @@ def store_total_pv(
     """
     Upsert a row into HEAT_MAP.TRACKED_PV.
     table_name is in YYYYMM format; YEAR and MONTH are extracted from it.
-    PACKAGE_CODE is resolved from Redis hash 'list_sites_setup'.
+    PACKAGE_CODE is resolved from Redis first, then database fallback.
     """
-    package_code = get_package_code_from_redis(site_id)
+    package_code = get_package_code(connection, site_id)
     if package_code is None:
         logger.info(f"store_total_pv: package code is null for site={site_id}, skipping")
         return False
@@ -847,13 +1085,35 @@ def store_total_pv(
         return True
     except Exception:
         connection.rollback()
-        logger.exception(f"store_total_pv failed for site={site_id}")
+        logger.error(f"store_total_pv failed for site={site_id}")
         return False
 
 
 # ============================================================================
 # LOCAL ENTRY POINT
 # ============================================================================
+def lambda_handler(event=None, context=None):
+    """
+    Entry point for Lambda. Routes to specific handlers based on event['source'].
+
+    - If source == "move.event" -> call move_handler
+    - If source == "move.missing.event" -> call move_missing_handler
+    - Else: log exception and do nothing (return 200 with no-op message)
+    """
+    try:
+        # Safely extract action from event; let unexpected errors bubble up.
+        action = event.get("action") if isinstance(event, dict) else None
+    except Exception:
+        logger.error("lambda_handler failed while parsing event")
+        # Re-raise so Lambda treats this as a failure (enabling retries/alerts)
+        raise
+    if action == "move":
+        return move_handler(event, context)
+    elif action == "move_missing":
+        return move_missing_handler(event, context)
+    else:
+        print(f"Unknown or missing action: {action}")
+        return {"status": "ignored"}
 
 if __name__ == "__main__":
     lambda_handler()

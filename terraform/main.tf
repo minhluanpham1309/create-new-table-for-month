@@ -42,7 +42,8 @@ module "shared_lambda_role" {
     try(var.monthly_adding_site_tables_consumer.lambda_inline_policies, {}), 
     try(var.delete_heat_map_cache.lambda_inline_policies, {}),
     try(var.delete_old_data_heat_map.lambda_inline_policies, {}),
-    try(var.move_data_to_mysql.lambda_inline_policies, {})
+    try(var.move_data_to_mysql.lambda_inline_policies, {}),
+    try(var.check_limit.lambda_inline_policies, {}),
   )
   
   managed_policy_arns = ["arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"]
@@ -90,7 +91,8 @@ module "shared_scheduler_role" {
     try(var.monthly_adding_site_tables_consumer.scheduler_inline_policies, {}),
     try(var.delete_heat_map_cache.scheduler_inline_policies, {}),
     try(var.delete_old_data_heat_map.scheduler_inline_policies, {}),
-    try(var.move_data_to_mysql.scheduler_inline_policies, {})
+    try(var.move_data_to_mysql.scheduler_inline_policies, {}),
+    try(var.check_limit.scheduler_inline_policies, {}),
   )
 
   tags = var.tags
@@ -106,6 +108,7 @@ module "valkey" {
   vpc_id                     = var.vpc_id
   subnet_ids                 = var.subnet_ids
   allowed_security_group_ids = var.allowed_security_group_ids
+  manage_allowed_security_group_ingress_rules = var.valkey_manage_allowed_security_group_ingress_rules
 
   # Valkey configuration
   node_type        = var.valkey_node_type
@@ -292,6 +295,46 @@ module "delete_old_data_heat_map" {
   schedule_retry_policy = var.delete_old_data_heat_map.schedule_retry_policy
 
   tags = merge(var.tags, try(var.delete_old_data_heat_map.tags, {}))
+}
+
+# Check limit
+module "check_limit" {
+  source = "./modules/check-limit"
+  count  = var.check_limit == null ? 0 : 1
+
+  project_name = var.project_name
+
+  lambda_function_name         = var.check_limit.lambda_function_name
+  lambda_handler               = var.check_limit.lambda_handler
+  lambda_runtime               = var.check_limit.lambda_runtime
+  lambda_timeout               = var.check_limit.lambda_timeout
+  lambda_memory_size           = var.check_limit.lambda_memory_size
+  lambda_architectures         = var.check_limit.lambda_architectures
+  lambda_environment_variables = var.check_limit.lambda_environment_variables
+  lambda_log_retention_in_days = var.check_limit.lambda_log_retention_in_days
+  lambda_alias                 = var.check_limit.lambda_alias
+
+  lambda_role_arn = module.shared_lambda_role.role_arn
+
+  # VPC
+  vpc_config            = try(var.check_limit.vpc_config, null)
+  create_security_group = var.check_limit.create_security_group
+  rds_security_group_id = var.check_limit.rds_security_group_id
+  smg_end_point_sg_id   = var.check_limit.smg_end_point_sg_id
+  netty_redis_sg_id     = try(var.check_limit.netty_redis_sg_id, null)
+
+  # EventBridge Scheduler
+  schedule_name                = var.check_limit.schedule_name
+  schedule_description         = var.check_limit.schedule_description
+  schedule_expression          = var.check_limit.schedule_expression
+  schedule_expression_timezone = var.check_limit.schedule_expression_timezone
+  schedule_enabled             = var.check_limit.schedule_enabled
+  schedule_input               = var.check_limit.schedule_input
+
+  scheduler_role_arn    = module.shared_scheduler_role.role_arn
+  schedule_retry_policy = var.check_limit.schedule_retry_policy
+
+  tags = merge(var.tags, try(var.check_limit.tags, {}))
 }
 
 # Move Data to MySQL (Lambda + EventBridge Scheduler) - Connects to RDS and Valkey
