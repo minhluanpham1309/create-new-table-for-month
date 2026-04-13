@@ -41,7 +41,7 @@ DEFAULT_TIME_DELETE_DATA = 30
 DEFAULT_PROFILE_ID = ""
 
 DEFAULT_REGION = "ap-northeast-1"
-DEFAULT_SECRET_NAME = "rds/heatmap-db-secret"
+DEFAULT_SECRET_NAME = "rds/db-test-private"
 
 
 # -----------------------------
