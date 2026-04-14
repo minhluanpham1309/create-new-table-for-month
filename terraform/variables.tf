@@ -122,22 +122,6 @@ variable "valkey_memory_alarm_threshold" {
     default     = 524288000 # 500 MB
 }
 
-# Step Function variables (unified object map)
-variable "step_functions" {
-  description = "Map of Step Functions to create"
-  type = map(object({
-    name                  = string
-    definition            = string
-    tags                  = optional(map(string))
-    state_machine_type    = optional(string, "STANDARD")
-    enable_logging        = optional(bool, true)
-    log_level             = optional(string, "OFF")
-    log_retention_in_days = optional(number, 7)
-    execution_role_arn    = optional(string)
-  }))
-  default = {}
-}
-
 # Monthly Adding Site Tables Producer (Lambda + EventBridge Scheduler)
 variable "monthly_adding_site_tables_producers" {
   description = "Configuration for monthly-adding-site-tables-producer"
@@ -455,6 +439,44 @@ variable "move_data_to_mysql" {
     })
 
     # Tags
+    tags = optional(map(string), {})
+  })
+
+  nullable = true
+  default  = null
+}
+
+# ================================================================
+# CloudWatch Alarms
+# ================================================================
+variable "cloudwatch_alarms" {
+  description = <<-EOT
+    Configuration for the cloudwatch-alarm module.
+    Set to null to skip creating any CloudWatch alarms.
+  EOT
+  type = object({
+    name = optional(string, null) # defaults to project_name-environment
+
+    alarms = optional(map(object({
+      namespace           = string
+      metric_name         = string
+      dimensions          = optional(map(string), {})
+      threshold           = number
+      comparison_operator = optional(string, "GreaterThanOrEqualToThreshold")
+      period              = optional(number, 300)
+      evaluation_periods  = optional(number, 2)
+      datapoints_to_alarm = optional(number, null)
+      statistic           = optional(string, "Average")
+      extended_statistic  = optional(string, null)
+      treat_missing_data  = optional(string, "missing")
+      ok_actions_enabled  = optional(bool, false)
+      alarm_description   = optional(string, "")
+    })), {})
+
+    notification = optional(object({
+      existing_sns_topic_arns = optional(string, null)
+    }), {})
+
     tags = optional(map(string), {})
   })
 

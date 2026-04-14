@@ -14,6 +14,7 @@ locals {
   move_data_to_mysql_lambda_arn  = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_move_data_to_mysql}:${var.lambda_alias}"
   check_limit_lambda_arn  = "arn:aws:lambda:${local.aws_shorthand}:function:${var.lambda_function_name_check_limit}:${var.lambda_alias}"
   sns_topic_arn               = "arn:aws:sns:${local.aws_shorthand}:${var.sns_topic_monthly_adding_site_tables_notifications}"
+  sns_topic_alarm_arn         = "arn:aws:sns:${local.aws_shorthand}:SlackHQ_dev-alert-mieruca-heatmap"
   step_functions_state_machine_arn = "arn:aws:states:${local.aws_shorthand}:stateMachine:${var.sfn_name_monthly_adding_site_tables_consumer}"
 
   # ===================================================================
@@ -82,6 +83,33 @@ locals {
         Resource = [local.sns_topic_arn]
       }]
     })
+  }
+  
+  # ── All managed Lambda function names ─────────────────────────────────────
+  # Single source of truth used to generate a common error alarm for every Lambda.
+  lambda_function_names = [
+    var.lambda_function_name_check_limit,
+  ]
+
+  # ── Common Lambda error alarm (generated for every Lambda above) ──────────
+  # Fires when >= 3 unhandled Lambda errors accumulate within 15 minutes.
+  # (retry=3 + event_age=900 s means all retries are exhausted in ≤ 15 min.)
+  lambda_error_alarms = {
+    for fn_name in local.lambda_function_names :
+    "${fn_name}-errors" => {
+      namespace           = "AWS/Lambda"
+      metric_name         = "Errors"
+      dimensions          = { FunctionName = fn_name }
+      threshold           = 3
+      comparison_operator = "GreaterThanOrEqualToThreshold"
+      period              = 900 # 15 minutes
+      evaluation_periods  = 1
+      datapoints_to_alarm = 1
+      statistic           = "Sum"
+      alarm_description   = "${fn_name} Lambda: >= 3 errors in 15 minutes"
+      treat_missing_data  = "notBreaching"
+      ok_actions_enabled  = false
+    }
   }
 }
 
@@ -348,9 +376,9 @@ module "heatmap_japan_dev" {
 
     lambda_environment_variables = {
       RDS_SECRET_NAME = "rds/db-test-private"
-      REDIS_NETTY_HOST = "172.31.16.248"
+      REDIS_HOST      = "172.31.16.248"
       REDIS_PORT      = "6379"
-      REDIS_NETTY_DB  = "0"
+      REDIS_DB        = "0"
       REDIS_SSL       = "false"
     }
     
@@ -386,5 +414,35 @@ module "heatmap_japan_dev" {
       maximum_event_age_in_seconds = 900
       maximum_retry_attempts       = 3
     }
+  }
+  
+  # ================================================================
+  # CloudWatch Metric Alarms
+  # ================================================================
+  cloudwatch_alarms = {
+    notification = {
+      existing_sns_topic_arns = local.sns_topic_alarm_arn
+    }
+
+    alarms = merge(
+      local.lambda_error_alarms,
+      {
+        "${var.sfn_name_monthly_adding_site_tables_consumer}-execution-failed" = {
+          namespace           = "AWS/States"
+          metric_name         = "ExecutionsFailed"
+          dimensions = { StateMachineArn = local.step_functions_state_machine_arn }
+          threshold           = 1
+          comparison_operator = "GreaterThanOrEqualToThreshold"
+          period              = 900
+          evaluation_periods  = 1
+          datapoints_to_alarm = 1
+          statistic           = "Sum"
+          extended_statistic  = null
+          alarm_description   = "${var.sfn_name_monthly_adding_site_tables_consumer}: execution failed after retries"
+          treat_missing_data  = "notBreaching"
+          ok_actions_enabled  = false
+        }
+      }
+    )
   }
 }

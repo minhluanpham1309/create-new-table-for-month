@@ -378,3 +378,21 @@ module "move_data_to_mysql" {
 
   tags = merge(var.tags, try(var.move_data_to_mysql.tags, {}))
 }
+
+# ================================================================
+# CloudWatch Metric Alarms
+# ================================================================
+module "cloudwatch_alarms" {
+  source = "./modules/cloudwatch-alarm"
+  count  = var.cloudwatch_alarms == null ? 0 : 1
+
+  name = coalesce(
+    try(var.cloudwatch_alarms.name, null),
+    "${var.project_name}-${var.environment}"
+  )
+
+  alarms       = try(var.cloudwatch_alarms.alarms, {})
+  notification = try(var.cloudwatch_alarms.notification, {})
+
+  tags = merge(var.tags, try(var.cloudwatch_alarms.tags, {}))
+}

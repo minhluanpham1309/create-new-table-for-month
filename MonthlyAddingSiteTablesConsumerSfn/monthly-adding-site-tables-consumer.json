@@ -25,7 +25,7 @@
             "States.ALL"
           ],
           "ResultPath": "$.error",
-          "Next": "SendLambdaExecutionFailureEmail"
+          "Next": "WorkflowFailed"
         }
       ],
       "ResultPath": "$.lambdaResult",
@@ -107,16 +107,6 @@
         }
       ],
       "Next": "WorkflowComplete"
-    },
-    "SendLambdaExecutionFailureEmail": {
-      "Type": "Task",
-      "Resource": "arn:aws:states:::sns:publish",
-      "Parameters": {
-        "TopicArn": "arn:aws:sns:ap-northeast-1:{account_id}:monthly-adding-site-tables-notifications",
-        "Subject": "[Heat Map] Automatic create new table for storage",
-        "Message.$": "States.Format('Dear Administrator,\n\nI have bad news for you!\n\nSystem just failed to create new tables for monthly storage completely.\n\nTotal count: All sites\nError count: All sites\n\nError details:\n{}\n\nPlease check and make manual correction soon!\nReason mistake please check log system:\n/aws/lambda/MonthlyAddingSiteTablesConsumer\n\nTimestamp (UTC): {}\nNote: Add 9 hours for JST\n\nThank you so much!\n\nMieruca Heatmap Machine', $.error.Cause, $$.State.EnteredTime)"
-      },
-      "Next": "WorkflowFailed"
     },
     "WorkflowComplete": {
       "Type": "Succeed"
