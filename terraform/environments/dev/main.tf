@@ -433,7 +433,7 @@ module "heatmap_japan_dev" {
           dimensions = { StateMachineArn = local.step_functions_state_machine_arn }
           threshold           = 1
           comparison_operator = "GreaterThanOrEqualToThreshold"
-          period              = 900
+          period              = 3600
           evaluation_periods  = 1
           datapoints_to_alarm = 1
           statistic           = "Sum"

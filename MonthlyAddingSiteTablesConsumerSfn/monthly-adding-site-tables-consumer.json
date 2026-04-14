@@ -14,7 +14,7 @@
           "ErrorEquals": [
             "States.ALL"
           ],
-          "IntervalSeconds": 600,
+          "IntervalSeconds": 300,
           "MaxAttempts": 3,
           "BackoffRate": 2
         }
